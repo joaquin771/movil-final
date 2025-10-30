@@ -1,107 +1,101 @@
+// navigation/Navigation.js
 import React, { useEffect, useState } from "react";
 import { NavigationContainer } from "@react-navigation/native";
-// 🚨 CAMBIO IMPORTANTE: Usamos createStackNavigator para un mejor control de las transiciones personalizadas
-import { createStackNavigator, CardStyleInterpolators, TransitionPresets } from "@react-navigation/stack"; 
+import { createStackNavigator } from "@react-navigation/stack";
 import { View, ActivityIndicator, StyleSheet } from "react-native";
 import { onAuthStateChanged } from "firebase/auth";
-import { auth } from "../src/firebaseConfig";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { auth } from "../src/firebaseConfig";
 
-// Screens
+// 🟡 <-- import theme context
+import { useTheme } from "../src/theme/ThemeContext";
+
+/* Screens */
 import Welcome from "../screens/Welcome";
 import Login from "../screens/Login";
 import SignUp from "../screens/SignUp";
 import Home from "../screens/Home";
 import ForgotPassword from "../screens/ForgotPassword";
 import Products from "../screens/Products";
-import Profile from "../screens/Profile"; 
+import Profile from "../screens/Profile";
+import ProductDetails from "../screens/ProductDetails";
 
 const Stack = createStackNavigator();
 
-// --- CONFIGURACIÓN DE TRANSICIÓN ---
-
-// Opción 1: Transición de Aparición/Desvanecimiento (Fade) - Más suave
+/* fade global */
 const forFade = ({ current }) => ({
   cardStyle: {
     opacity: current.progress,
   },
 });
 
-// Opción 2: Sin Animación (Instantánea) - Más seca, como un cambio de pestaña
-const noAnimation = {
-    transitionSpec: {
-        open: { animation: 'timing', config: { duration: 0 } },
-        close: { animation: 'timing', config: { duration: 0 } },
-    },
-    cardStyleInterpolator: ({ current }) => ({
-        cardStyle: {
-            opacity: current.progress.interpolate({
-                inputRange: [0, 1],
-                outputRange: [0, 1],
-            }),
-        },
-    }),
-};
-
-// --- FIN CONFIGURACIÓN DE TRANSICIÓN ---
-
 export default function Navigation() {
+  const { theme, navigationTheme } = useTheme(); // <- agarramos colores globales
+
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [hasLoggedBefore, setHasLoggedBefore] = useState(false);
 
   useEffect(() => {
     const init = async () => {
-      const loggedBefore = await AsyncStorage.getItem("hasLoggedBefore");
-      setHasLoggedBefore(!!loggedBefore);
+        const loggedBefore = await AsyncStorage.getItem("hasLoggedBefore");
+        setHasLoggedBefore(!!loggedBefore);
 
-      const unsubscribe = onAuthStateChanged(auth, (user) => {
-        setIsAuthenticated(!!user);
-        if (user) {
-          AsyncStorage.setItem("hasLoggedBefore", "true");
-        }
-        setIsLoading(false);
-      });
+        const unsubscribe = onAuthStateChanged(auth, (user) => {
+          setIsAuthenticated(!!user);
 
-      return unsubscribe;
+          if (user) {
+            AsyncStorage.setItem("hasLoggedBefore", "true");
+          }
+
+          setIsLoading(false);
+        });
+
+        return unsubscribe;
     };
+
     init();
   }, []);
 
+  // loading inicial
   if (isLoading) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#FCD73E" />
+      <View style={[styles.loadingContainer, { backgroundColor: theme.background }]}>
+        <ActivityIndicator size="large" color={theme.primary} />
       </View>
     );
   }
 
   return (
-    <NavigationContainer>
-      <Stack.Navigator 
-        screenOptions={{ 
+    <NavigationContainer theme={navigationTheme}>
+      <Stack.Navigator
+        screenOptions={{
           headerShown: false,
-          // 💡 Aplicamos la interpolación para la transición de Fade a todas las pantallas
-          cardStyleInterpolator: forFade, 
-          gestureEnabled: false, // Desactiva el gesto de deslizar para volver
+          cardStyleInterpolator: forFade,
+          gestureEnabled: false,
         }}
       >
         {isAuthenticated ? (
-          // ✅ Usuario autenticado → Rutas principales
           <>
             <Stack.Screen name="Home" component={Home} />
             <Stack.Screen name="Products" component={Products} />
             <Stack.Screen name="Profile" component={Profile} />
+            <Stack.Screen
+              name="ProductDetails"
+              component={ProductDetails}
+              options={{
+                headerShown: false,
+                gestureEnabled: true,
+              }}
+            />
           </>
         ) : hasLoggedBefore ? (
-          // ✅ Usuario ya se logueó alguna vez → Login
           <>
             <Stack.Screen name="Login" component={Login} />
             <Stack.Screen name="SignUp" component={SignUp} />
             <Stack.Screen name="ForgotPassword" component={ForgotPassword} />
           </>
         ) : (
-          // ✅ Usuario nuevo → Welcome
           <>
             <Stack.Screen name="Welcome" component={Welcome} />
             <Stack.Screen name="Login" component={Login} />
@@ -119,6 +113,5 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#000",
   },
 });

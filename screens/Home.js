@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import {
   View,
   Text,
@@ -6,773 +6,622 @@ import {
   StyleSheet,
   TouchableOpacity,
   Image,
-  Dimensions,
   ImageBackground,
-  Alert,
   Platform,
-  Modal,
-  TouchableWithoutFeedback,
+  Dimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { PieChart, BarChart } from "react-native-chart-kit";
+import { PieChart } from "react-native-chart-kit";
 import { db, auth } from "../src/firebaseConfig";
-import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
-import { signOut, onAuthStateChanged } from "firebase/auth";
+import {
+  collection,
+  onSnapshot,
+  orderBy,
+  query,
+  where,
+} from "firebase/firestore";
+import { onAuthStateChanged } from "firebase/auth";
 import CustomAlert from "../components/CustomAlert";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 
-// --- Constantes y Configuración ---
-const PIE_COLORS = ["#FFD600", "#FFB300", "#FF8F00", "#FDD835", "#FFE082", "#FFC107"];
-const screenWidth = Dimensions.get("window").width;
-const CHART_INNER_WIDTH = screenWidth - 60;
-const DRAWER_WIDTH = screenWidth * 0.75;
+// 👇 usamos el theme global
+import { useTheme } from "../src/theme/ThemeContext";
 
-// COLORES PARA MODO OSCURO/CLARO
-const COLORS = {
-  light: {
-    background: "#F7F7F7",
-    card: "#FFFFFF",
-    text: "#000000",
-    secondaryText: "#333333",
-    invertedCard: "#1E1E1E",
-    invertedText: "#fff",
-    footerBackground: "#FFD600",
-    separator: "#f0f0f0",
-    chartBackground: "#fff",
-    chartColor: (opacity = 1) => `rgba(0, 0, 0, ${opacity})`,
-    totalValueLabelLight: "#888",
-    totalValueFooterLight: "#555",
-  },
-  dark: {
-    background: "#121212",
-    card: "#1E1E1E",
-    text: "#FFFFFF",
-    secondaryText: "#CCCCCC",
-    invertedCard: "#FFD600",
-    invertedText: "#000",
-    footerBackground: "#FFD600",
-    separator: "#333333",
-    chartBackground: "#1E1E1E",
-    chartColor: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`,
-    totalValueLabelDark: "#333",
-    totalValueFooterDark: "#333",
-  },
-};
+const PIE_COLORS = ["#FFD600", "#FFB300", "#FF8F00"];
+const HEADER_IMAGE = require("../assets/header.jpg");
 
-// RUTAS LOCALES
-const HEADER_IMAGE_SOURCE = require("../assets/header.jpg");
-const DRAWER_HEADER_IMAGE_SOURCE = require("../assets/headerhome.jpg");
-
-// --- Lógica de gráficos ---
-const prepareChartData = (productos) => {
-  const categoriesCount = {};
-  let totalInventoryValue = 0;
-
-  productos.forEach((p) => {
-    const stock = parseFloat(p.stock || 0);
-    const precio = parseFloat(p.precio || 0);
-    const cat = p.categoria || "Sin Categoría";
-    categoriesCount[cat] = (categoriesCount[cat] || 0) + 1;
-    totalInventoryValue += stock * precio;
-  });
-
-  const pieData = Object.keys(categoriesCount)
-    .map((cat, i) => ({
-      name: cat,
-      count: categoriesCount[cat],
-      color: PIE_COLORS[i % PIE_COLORS.length],
-      legendFontColor: "#000",
-      legendFontSize: 13,
-    }))
-    .filter((item) => item.count > 0);
-
-  const topStockProducts = productos
-    .filter((p) => (p.stock || 0) > 0)
-    .sort((a, b) => (b.stock || 0) - (a.stock || 0))
-    .slice(0, 5);
-
-  const labels = topStockProducts.map((p) =>
-    p.nombre?.length > 10 ? p.nombre.substring(0, 9) + "..." : p.nombre || ""
-  );
-  const data = topStockProducts.map((p) => Number(p.stock) || 0);
-
-  const barChartData = {
-    labels,
-    datasets: [
-      {
-        data,
-        colors: data.map((_, i) => (opacity = 1) => PIE_COLORS[i % PIE_COLORS.length]),
-      },
-    ],
-  };
-
-  return { pieData, barChartData, totalInventoryValue };
-};
-
-// --- Header ---
-const CustomHeader = React.memo(({ onMenuPress }) => {
-  return (
-    <ImageBackground source={HEADER_IMAGE_SOURCE} style={styles.headerBackground} resizeMode="cover">
-      <View style={[styles.headerOverlay, { backgroundColor: "rgba(0, 0, 0, 0.65)" }]} />
-      <View style={styles.headerContent}>
-        <TouchableOpacity style={styles.headerMenuButton} onPress={onMenuPress}>
-          <Ionicons name="menu-outline" size={28} color="#FFD600" />
-        </TouchableOpacity>
-        <Image source={require("../assets/logo.png")} style={styles.logoGrande} resizeMode="contain" />
-        <View style={styles.headerLogoutButton} />
-      </View>
-    </ImageBackground>
-  );
-});
-
-// --- Drawer ---
-const DrawerItem = ({ icon, label, onPress, isCurrent, isDarkMode, toggleDarkMode }) => {
-  const currentColors = isDarkMode ? COLORS.dark : COLORS.light;
-  const itemStyle = [
-    drawerStyles.drawerItem,
-    { borderBottomColor: currentColors.separator },
-    isCurrent && { backgroundColor: "rgba(255, 214, 0, 0.2)" },
-  ];
-  const labelStyle = [
-    drawerStyles.drawerItemLabel,
-    { color: isDarkMode ? COLORS.dark.text : COLORS.light.secondaryText },
-  ];
-  const iconColor = isDarkMode ? COLORS.dark.secondaryText : COLORS.light.secondaryText;
-
-  if (label === "Modo Oscuro") {
-    return (
-      <TouchableOpacity style={itemStyle} onPress={toggleDarkMode}>
-        <Ionicons name={isDarkMode ? "sunny-outline" : "moon-outline"} size={24} color={iconColor} />
-        <Text style={labelStyle}>{isDarkMode ? "Modo Claro" : "Modo Oscuro"}</Text>
-      </TouchableOpacity>
-    );
-  }
-
-  return (
-    <TouchableOpacity style={itemStyle} onPress={onPress}>
-      <Ionicons name={icon} size={24} color={iconColor} />
-      <Text style={labelStyle}>{label}</Text>
-    </TouchableOpacity>
-  );
-};
-
-const DrawerMenu = ({
-  isOpen,
-  onClose,
-  navigation,
-  confirmarCerrarSesion,
-  user,
-  setAlertConfig,
-  setAlertVisible,
-  isDarkMode,
-  toggleDarkMode,
-}) => {
-  const navigateToScreen = useCallback(
-    (screenName, displayMessage) => {
-      onClose();
-      if (screenName) {
-        navigation.navigate(screenName);
-      } else {
-        setAlertConfig({
-          type: "info",
-          message: displayMessage,
-          customTitle: "Próximamente",
-          onConfirm: () => setAlertVisible(false),
-          onCancel: undefined,
-        });
-        setAlertVisible(true);
-      }
-    },
-    [onClose, navigation, setAlertConfig, setAlertVisible]
-  );
-
-  const displayName = user?.displayName || "Empleado";
-  const email = user?.email || "Sin Email";
-  const photoURL = user?.photoURL || "https://placehold.co/100x100/FFD600/000?text=HP";
-
-  const drawerBackgroundColor = isDarkMode ? COLORS.dark.background : COLORS.light.card;
-  const profileTextColor = "#fff";
-  const profileEmailColor = "#ccc";
-
-  return (
-    <Modal animationType="fade" transparent visible={isOpen} onRequestClose={onClose}>
-      <TouchableWithoutFeedback onPress={onClose}>
-        <View style={drawerStyles.overlay}>
-          <TouchableWithoutFeedback>
-            <View style={[drawerStyles.drawer, { backgroundColor: drawerBackgroundColor }]}>
-              <ScrollView showsVerticalScrollIndicator={false}>
-                <ImageBackground
-                  source={DRAWER_HEADER_IMAGE_SOURCE}
-                  style={drawerStyles.profileHeaderBackground}
-                  resizeMode="cover"
-                >
-                  <View style={drawerStyles.profileHeaderOverlay}>
-                    <Image
-                      source={{ uri: photoURL }}
-                      style={drawerStyles.profileImage}
-                      onError={(e) => console.log("Error loading profile image:", e.nativeEvent.error)}
-                    />
-                    <Text style={[drawerStyles.profileName, { color: profileTextColor }]} numberOfLines={1}>
-                      {displayName}
-                    </Text>
-                    <Text style={[drawerStyles.profileEmail, { color: profileEmailColor }]} numberOfLines={1}>
-                      {email}
-                    </Text>
-                  </View>
-                </ImageBackground>
-
-                <DrawerItem
-                  icon="home-outline"
-                  label="Inicio (Dashboard)"
-                  onPress={onClose}
-                  isCurrent
-                  isDarkMode={isDarkMode}
-                />
-                <DrawerItem
-                  icon="cube-outline"
-                  label="Productos"
-                  onPress={() => navigation.navigate("Products")}
-                  isDarkMode={isDarkMode}
-                />
-                <DrawerItem
-                  icon="people-outline"
-                  label="Empleados"
-                  onPress={() => navigateToScreen(null, "Módulo de Empleados en desarrollo.")}
-                  isDarkMode={isDarkMode}
-                />
-                <DrawerItem
-                  icon="receipt-outline"
-                  label="Pedidos"
-                  onPress={() => navigateToScreen(null, "Módulo de Pedidos en desarrollo.")}
-                  isDarkMode={isDarkMode}
-                />
-                <DrawerItem
-                  icon="location-outline"
-                  label="Entregas"
-                  onPress={() => navigateToScreen(null, "Módulo de Entregas en desarrollo.")}
-                  isDarkMode={isDarkMode}
-                />
-                <DrawerItem
-                  icon="alert-circle-outline"
-                  label="Incidentes"
-                  onPress={() => navigateToScreen(null, "Módulo de Incidentes en desarrollo.")}
-                  isDarkMode={isDarkMode}
-                />
-
-                <View style={{ marginVertical: 10 }} />
-                <DrawerItem
-                  icon={isDarkMode ? "sunny-outline" : "moon-outline"}
-                  label="Modo Oscuro"
-                  onPress={toggleDarkMode}
-                  isDarkMode={isDarkMode}
-                  toggleDarkMode={toggleDarkMode}
-                />
-
-                <View style={{ marginVertical: 20 }} />
-                <DrawerItem
-                  icon="log-out-outline"
-                  label="Cerrar Sesión"
-                  onPress={() => {
-                    onClose();
-                    confirmarCerrarSesion();
-                  }}
-                  isDarkMode={isDarkMode}
-                />
-              </ScrollView>
-            </View>
-          </TouchableWithoutFeedback>
-        </View>
-      </TouchableWithoutFeedback>
-    </Modal>
-  );
-};
-
-// --- Home ---
 export default function Home({ navigation }) {
+  const { theme, isDarkMode } = useTheme();
+
   const [productos, setProductos] = useState([]);
+  const [pedidos, setPedidos] = useState([]);
   const [alertVisible, setAlertVisible] = useState(false);
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [user, setUser] = useState(null);
-  const [isDarkMode, setIsDarkMode] = useState(false);
 
-  const [alertConfig, setAlertConfig] = useState({
-    type: "success",
-    message: "",
-    customTitle: "",
-    onConfirm: () => setAlertVisible(false),
-    onCancel: () => setAlertVisible(false),
-  });
-
-  const { pieData, barChartData, totalInventoryValue } = useMemo(
-    () => prepareChartData(productos),
-    [productos]
-  );
-
-  const toggleDarkMode = useCallback(async () => {
-    const newMode = !isDarkMode;
-    setIsDarkMode(newMode);
-    try {
-      await AsyncStorage.setItem("darkMode", newMode ? "true" : "false");
-    } catch (error) {
-      console.error("Error saving dark mode preference:", error);
-    }
-  }, [isDarkMode]);
-
-  const currentColors = isDarkMode ? COLORS.dark : COLORS.light;
-
-  const chartConfig = {
-    backgroundColor: currentColors.chartBackground,
-    backgroundGradientFrom: currentColors.chartBackground,
-    backgroundGradientTo: currentColors.chartBackground,
-    decimalPlaces: 0,
-    color: currentColors.chartColor,
-    labelColor: currentColors.chartColor,
-    barPercentage: 0.6,
-    fillShadowGradient: "#FFD600",
-    fillShadowGradientOpacity: 0.7,
-    style: { borderRadius: 16 },
-  };
-
+  // auth listener
   useEffect(() => {
-    const loadPreferences = async () => {
-      try {
-        const storedMode = await AsyncStorage.getItem("darkMode");
-        if (storedMode !== null) setIsDarkMode(storedMode === "true");
-      } catch (error) {
-        console.error("Failed to load dark mode preference:", error);
-      }
-    };
-    loadPreferences();
-
-    const authUnsub = onAuthStateChanged(auth, async (currentUser) => {
-      if (currentUser) {
-        const userData = {
-          ...currentUser,
-          displayName: currentUser.displayName || `Usuario ${currentUser.uid.substring(0, 4)}`,
-          photoURL: currentUser.photoURL || "https://placehold.co/100x100/FFD600/000?text=HP",
-        };
-        setUser(userData);
-
-        const welcomeShownKey = `welcomeShown_${currentUser.uid}`;
-        const yaMostrada = await AsyncStorage.getItem(welcomeShownKey);
-
-        if (!yaMostrada) {
-          setAlertConfig({
-            type: "success",
-            message: `¡Has iniciado sesión en Hollywood Producciones, ${userData.displayName || "empleado"}!`,
-            customTitle: "¡Bienvenido!",
-            onConfirm: async () => {
-              setAlertVisible(false);
-              await AsyncStorage.setItem(welcomeShownKey, "true");
-            },
-            onCancel: undefined,
-          });
-          setAlertVisible(true);
-        }
-      } else {
-        setUser(null);
-      }
-    });
-
-    const q = query(collection(db, "products"), orderBy("createdAt", "desc"));
-    const firestoreUnsub = onSnapshot(q, (snap) => {
-      const arr = snap.docs.map((d) => ({
-        id: d.id,
-        ...d.data(),
-        stock: parseFloat(d.data().stock || 0),
-        precio: parseFloat(d.data().precio || 0),
-      }));
-      setProductos(arr);
-    });
-
-    return () => {
-      authUnsub && authUnsub();
-      firestoreUnsub && firestoreUnsub();
-    };
+    const unsubAuth = onAuthStateChanged(auth, (u) => setUser(u));
+    return unsubAuth;
   }, []);
 
-  const confirmarCerrarSesion = useCallback(() => {
-    setAlertConfig({
-      type: "warning",
-      message: "¿Estás seguro de que deseas cerrar sesión y volver a la pantalla de inicio?",
-      customTitle: "Confirmar Cierre de Sesión",
-      onConfirm: async () => {
-        setAlertVisible(false);
-        try {
-          if (user?.uid) {
-            await AsyncStorage.removeItem(`welcomeShown_${user.uid}`);
-          }
-          await signOut(auth);
-        } catch (error) {
-          console.error("Error al cerrar sesión:", error);
-        }
-      },
-      onCancel: () => setAlertVisible(false),
+  // productos
+  useEffect(() => {
+    const q = query(collection(db, "products"), orderBy("createdAt", "desc"));
+    const unsub = onSnapshot(q, (snap) => {
+      const arr = snap.docs.map((d) => {
+        const data = d.data();
+        return {
+          id: d.id,
+          ...data,
+          stock: parseFloat(data.stock || 0),
+          precio: parseFloat(data.precio || 0),
+        };
+      });
+      setProductos(arr);
     });
-    setAlertVisible(true);
-  }, [user]);
+    return unsub;
+  }, []);
 
-  const toggleDrawer = useCallback(() => setIsDrawerOpen((prev) => !prev), []);
+  // pedidos pendientes
+  useEffect(() => {
+    const q = query(
+      collection(db, "orders"),
+      where("estado", "==", "pendiente")
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      setPedidos(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    });
+    return unsub;
+  }, []);
 
-  const dynamicStyles = useMemo(
-    () =>
-      StyleSheet.create({
-        container: { flex: 1, backgroundColor: currentColors.background },
+  const { totalStock, bajoStock, pieData } = useMemo(() => {
+    let totalStock = 0;
+    let bajoStock = 0;
+    const categorias = {};
 
-        totalValueCard: {
-          backgroundColor: currentColors.invertedCard,
-          borderRadius: 16,
-          padding: 20,
-          marginBottom: 15,
-          alignItems: "center",
-          elevation: 10,
-        },
-        totalValueLabel: {
-          fontSize: 14,
-          color: isDarkMode ? COLORS.dark.totalValueLabelDark : COLORS.light.totalValueLabelLight,
-          fontWeight: "600",
-          letterSpacing: 1.5,
-        },
-        totalValueNumber: {
-          fontSize: 36,
-          fontWeight: "900",
-          color: isDarkMode ? COLORS.light.text : "#FFD600",
-          marginVertical: 5,
-        },
-        totalValueFooter: {
-          fontSize: 12,
-          color: isDarkMode ? COLORS.dark.totalValueFooterDark : COLORS.light.totalValueFooterLight,
-        },
+    productos.forEach((p) => {
+      const stock = Number(p.stock) || 0;
+      totalStock += stock;
+      if (stock < 5) bajoStock++;
+      const cat = p.categoria || "Sin categoría";
+      categorias[cat] = (categorias[cat] || 0) + 1;
+    });
 
-        card: {
-          backgroundColor: currentColors.card,
-          marginTop: 15,
-          borderRadius: 16,
-          padding: 10,
-          elevation: 4,
-        },
-        cardTitle: {
-          fontSize: 18,
-          fontWeight: "700",
-          color: currentColors.text,
-          marginBottom: 10,
-          paddingHorizontal: 10,
-        },
-        emptyText: {
-          textAlign: "center",
-          color: currentColors.secondaryText,
-          marginTop: 10,
-          paddingBottom: 10,
-        },
+    const pieData = Object.keys(categorias).map((cat, i) => ({
+      name: cat,
+      count: categorias[cat],
+      color: PIE_COLORS[i % PIE_COLORS.length],
+      legendFontColor: theme.text,
+      legendFontSize: 13,
+    }));
 
-        tituloSeccion: {
-          fontSize: 20,
-          fontWeight: "700",
-          color: currentColors.text,
-          marginTop: 30,
-          marginBottom: 10,
-        },
-        activityItem: {
-          flexDirection: "row",
-          alignItems: "center",
-          marginTop: 8,
-          paddingVertical: 8,
-          paddingHorizontal: 10,
-          borderBottomWidth: 1,
-          borderBottomColor: currentColors.separator,
-        },
-        activityText: {
-          marginLeft: 8,
-          fontSize: 14,
-          color: currentColors.secondaryText,
-        },
+    return { totalStock, bajoStock, pieData };
+  }, [productos, theme.text]);
 
-        cajaIcono: {
-          backgroundColor: currentColors.card,
-          borderRadius: 15,
-          borderWidth: 1,
-          borderColor: currentColors.separator,
-          width: 70,
-          height: 70,
-          justifyContent: "center",
-          alignItems: "center",
-          elevation: 2,
-        },
-        textoIcono: {
-          fontSize: 12,
-          fontWeight: "600",
-          color: currentColors.text,
-          textAlign: "center",
-          marginTop: 5,
-        },
+  // Colores derivados del theme para las tarjetas especiales
+  const colorsForCards = {
+    totalInventoryBg: theme.primary, // dorado
+    totalInventoryText: "#000", // contraste fijo negro sobre dorado
+    lowStockCardBg: theme.card,
+    lowStockText: theme.text,
+    pedidosCardBg: theme.primary,
+    pedidosText: "#000",
+    pedidosBtnBg: "#000",
+    pedidosBtnText: theme.primary,
+  };
 
-        navInferior: {
-          backgroundColor: COLORS.light.footerBackground,
-          flexDirection: "row",
-          justifyContent: "space-around",
-          alignItems: "center",
-          paddingVertical: 10,
-          position: "absolute",
-          bottom: 0,
-          width: "100%",
-          height: 85,
-          borderTopLeftRadius: 15,
-          borderTopRightRadius: 15,
-          elevation: 10,
-        },
-        textoNav: {
-          fontSize: 12,
-          fontWeight: "600",
-          color: currentColors.text,
-        },
-      }),
-    [isDarkMode, currentColors]
-  );
+  const chartConfig = {
+    backgroundGradientFrom: theme.card,
+    backgroundGradientTo: theme.card,
+    color: () => theme.text,
+  };
 
   return (
-    <View style={dynamicStyles.container}>
-      <CustomHeader onMenuPress={toggleDrawer} />
+    <View
+      style={[
+        styles.container,
+        { backgroundColor: theme.background },
+      ]}
+    >
+      {/* Header */}
+      <ImageBackground source={HEADER_IMAGE} style={styles.headerBackground}>
+        <View
+          style={[
+            styles.headerOverlay,
+            { backgroundColor: theme.headerOverlay },
+          ]}
+        />
+        <View style={styles.headerContent}>
+          <Image
+            source={require("../assets/logo.png")}
+            style={styles.logoGrande}
+            resizeMode="contain"
+          />
+        </View>
+      </ImageBackground>
 
+      {/* Contenido principal */}
       <ScrollView
         showsVerticalScrollIndicator={false}
-        style={{ flex: 1 }}
-        contentContainerStyle={{ paddingBottom: 80, paddingHorizontal: 20 }}
+        contentContainerStyle={{ paddingBottom: 160, paddingHorizontal: 20 }}
       >
-        <Text style={[styles.title, { color: currentColors.text }]}>Dashboard</Text>
+        <Text style={[styles.title, { color: theme.text }]}>Dashboard</Text>
 
-        <View style={dynamicStyles.totalValueCard}>
-          <Text style={dynamicStyles.totalValueLabel}>VALOR TOTAL INVENTARIO</Text>
-          <Text style={dynamicStyles.totalValueNumber}>
-            $ {totalInventoryValue.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+        {/* TOTAL INVENTARIO */}
+        <View
+          style={[
+            styles.totalValueCard,
+            { backgroundColor: colorsForCards.totalInventoryBg },
+          ]}
+        >
+          <Text
+            style={[
+              styles.totalValueLabel,
+              { color: colorsForCards.totalInventoryText },
+            ]}
+          >
+            TOTAL INVENTARIO DISPONIBLE
           </Text>
-          <Text style={dynamicStyles.totalValueFooter}>Stock total y precios registrados</Text>
+          <Text
+            style={[
+              styles.totalValueNumber,
+              { color: colorsForCards.totalInventoryText },
+            ]}
+          >
+            {isNaN(totalStock)
+              ? "0"
+              : totalStock.toLocaleString("es-AR")}
+          </Text>
         </View>
 
-        <View style={dynamicStyles.card}>
-          <Text style={dynamicStyles.cardTitle}>Top 5 Productos con Mayor Stock</Text>
-          {barChartData.datasets[0].data.length > 0 ? (
-            <BarChart
-              data={barChartData}
-              width={CHART_INNER_WIDTH}
-              height={250}
-              // ⬇️ ⬇️ Fix importante: usar sufijo, no label con “Uds”
-              yAxisSuffix=" uds"
-              chartConfig={chartConfig}
-              verticalLabelRotation={-15}
-              fromZero
-              style={{ marginVertical: 8, alignSelf: "center", backgroundColor: currentColors.card, borderRadius: 16 }}
-              withCustomBarColorFromData
-              flatColor
+        {/* Bajo stock / Pedidos pendientes */}
+        <View style={styles.infoRow}>
+          {/* Bajo stock */}
+          <View
+            style={[
+              styles.infoCard,
+              { backgroundColor: colorsForCards.lowStockCardBg },
+            ]}
+          >
+            <Text
+              style={[
+                styles.infoTitle,
+                { color: colorsForCards.lowStockText },
+              ]}
+            >
+              Bajo stock
+            </Text>
+            <Text style={[styles.infoNumber, { color: "#FF3B30" }]}>
+              {bajoStock}
+            </Text>
+            <TouchableOpacity
+              style={[
+                styles.infoButton,
+                { backgroundColor: theme.primary },
+              ]}
+              onPress={() =>
+                navigation.navigate("Products", {
+                  filter: "lowStock",
+                })
+              }
+            >
+              <Text
+                style={[
+                  styles.infoButtonText,
+                  { color: "#000" },
+                ]}
+              >
+                Revisar stock
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Pedidos pendientes */}
+          <View
+            style={[
+              styles.infoCard,
+              { backgroundColor: colorsForCards.pedidosCardBg },
+            ]}
+          >
+            <Text
+              style={[
+                styles.infoTitle,
+                { color: colorsForCards.pedidosText },
+              ]}
+            >
+              Pedidos pendientes
+            </Text>
+            <Text
+              style={[
+                styles.infoNumber,
+                { color: colorsForCards.pedidosText },
+              ]}
+            >
+              {pedidos.length}
+            </Text>
+            <TouchableOpacity
+              style={[
+                styles.infoButton,
+                { backgroundColor: colorsForCards.pedidosBtnBg },
+              ]}
+              onPress={() => navigation.navigate("Orders")}
+            >
+              <Text
+                style={[
+                  styles.infoButtonText,
+                  { color: colorsForCards.pedidosBtnText },
+                ]}
+              >
+                Ver pedidos
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Agregar */}
+        <Text
+          style={[
+            styles.tituloSeccion,
+            { color: theme.text },
+          ]}
+        >
+          Agregar
+        </Text>
+
+        <View style={styles.filaIconos}>
+          <TouchableOpacity
+            style={[
+              styles.cajaIcono,
+              { backgroundColor: theme.card },
+            ]}
+            onPress={() => navigation.navigate("Products")}
+          >
+            <Ionicons
+              name="cube-outline"
+              size={28}
+              color={theme.text}
             />
-          ) : (
-            <Text style={dynamicStyles.emptyText}>Carga productos con stock para este reporte.</Text>
-          )}
+            <Text
+              style={[
+                styles.textoIcono,
+                { color: theme.text },
+              ]}
+            >
+              Productos
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.cajaIcono,
+              { backgroundColor: theme.card },
+            ]}
+            onPress={() => navigation.navigate("Orders")}
+          >
+            <Ionicons
+              name="receipt-outline"
+              size={28}
+              color={theme.text}
+            />
+            <Text
+              style={[
+                styles.textoIcono,
+                { color: theme.text },
+              ]}
+            >
+              Pedidos
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.cajaIcono,
+              { backgroundColor: theme.card },
+            ]}
+            onPress={() => setAlertVisible(true)}
+          >
+            <Ionicons
+              name="alert-circle-outline"
+              size={28}
+              color={theme.text}
+            />
+            <Text
+              style={[
+                styles.textoIcono,
+                { color: theme.text },
+              ]}
+            >
+              Incidentes
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.cajaIcono,
+              { backgroundColor: theme.card },
+            ]}
+            onPress={() => navigation.navigate("Empleados")}
+          >
+            <Ionicons
+              name="people-outline"
+              size={28}
+              color={theme.text}
+            />
+            <Text
+              style={[
+                styles.textoIcono,
+                { color: theme.text },
+              ]}
+            >
+              Empleados
+            </Text>
+          </TouchableOpacity>
         </View>
 
-        <View style={dynamicStyles.card}>
-          <Text style={dynamicStyles.cardTitle}>Distribución de Productos (por Item)</Text>
+        {/* Gráfico de categorías */}
+        <View
+          style={[
+            styles.card,
+            { backgroundColor: theme.card },
+          ]}
+        >
+          <Text
+            style={[
+              styles.cardTitle,
+              { color: theme.text },
+            ]}
+          >
+            Productos por categoría
+          </Text>
           {pieData.length > 0 ? (
             <PieChart
-              data={pieData.map((item) => ({
-                ...item,
-                legendFontColor: currentColors.secondaryText,
-              }))}
-              width={CHART_INNER_WIDTH}
+              data={pieData}
+              width={Dimensions.get("window").width - 60}
               height={200}
               accessor="count"
               backgroundColor="transparent"
+              chartConfig={chartConfig}
               paddingLeft="15"
-              chartConfig={{ ...chartConfig, color: currentColors.chartColor }}
-              center={[CHART_INNER_WIDTH / 6, 0]}
-              style={{ alignSelf: "center", marginTop: 10, paddingRight: 15 }}
+              style={{ alignSelf: "center" }}
             />
           ) : (
-            <Text style={dynamicStyles.emptyText}>No hay datos de productos todavía</Text>
+            <Text
+              style={{
+                textAlign: "center",
+                color: theme.textSecondary,
+              }}
+            >
+              No hay datos de productos todavía.
+            </Text>
           )}
         </View>
 
-        <Text style={dynamicStyles.tituloSeccion}>Agregar</Text>
-        <View style={styles.filaIconos}>
-          <TouchableOpacity style={dynamicStyles.cajaIcono} onPress={() => navigation.navigate("Products")}>
-            <Ionicons name="cube-outline" size={28} color={currentColors.text} />
-            <Text style={dynamicStyles.textoIcono}>Productos</Text>
-          </TouchableOpacity>
+        {/* Actividades recientes */}
+        <Text
+          style={[
+            styles.tituloSeccion,
+            { color: theme.text },
+          ]}
+        >
+          Actividades recientes
+        </Text>
+        <View
+          style={[
+            styles.card,
+            { backgroundColor: theme.card },
+          ]}
+        >
+          <Text
+            style={[
+              styles.cardTitle,
+              { color: theme.text },
+            ]}
+          >
+            Últimos productos creados
+          </Text>
 
-          <TouchableOpacity style={dynamicStyles.cajaIcono} onPress={() => setAlertVisible(true)}>
-            <Ionicons name="receipt-outline" size={28} color={currentColors.text} />
-            <Text style={dynamicStyles.textoIcono}>Pedidos</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={dynamicStyles.cajaIcono} onPress={() => setAlertVisible(true)}>
-            <Ionicons name="alert-circle-outline" size={28} color={currentColors.text} />
-            <Text style={dynamicStyles.textoIcono}>Incidentes</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={dynamicStyles.cajaIcono} onPress={() => setAlertVisible(true)}>
-            <Ionicons name="people-outline" size={28} color={currentColors.text} />
-            <Text style={dynamicStyles.textoIcono}>Empleados</Text>
-          </TouchableOpacity>
-        </View>
-
-        <Text style={dynamicStyles.tituloSeccion}>Actividades recientes</Text>
-        <View style={[dynamicStyles.card, { marginBottom: 20 }]}>
-          <Text style={[dynamicStyles.cardTitle, { marginBottom: 10 }]}>Últimos productos creados</Text>
           {productos.length > 0 ? (
             productos.slice(0, 5).map((p) => (
-              <View key={p.id} style={dynamicStyles.activityItem}>
-                <Ionicons name="cube-outline" size={20} color="#FFD600" />
-                <Text style={dynamicStyles.activityText}>
-                  Se agregó <Text style={{ fontWeight: "700" }}>{p.nombre}</Text> con stock {p.stock} uds.
+              <View key={p.id} style={styles.activityItem}>
+                <Ionicons
+                  name="cube-outline"
+                  size={20}
+                  color={theme.primary}
+                />
+                <Text
+                  style={[
+                    styles.activityText,
+                    { color: theme.text },
+                  ]}
+                >
+                  Se agregó{" "}
+                  <Text style={{ fontWeight: "700" }}>
+                    {p.nombre}
+                  </Text>{" "}
+                  con stock {p.stock} uds.
                 </Text>
               </View>
             ))
           ) : (
-            <Text style={dynamicStyles.emptyText}>No hay productos cargados aún.</Text>
+            <Text
+              style={{
+                textAlign: "center",
+                color: theme.textSecondary,
+              }}
+            >
+              No hay productos cargados aún.
+            </Text>
           )}
         </View>
       </ScrollView>
 
-      <View style={dynamicStyles.navInferior}>
-        <TouchableOpacity onPress={() => navigation.navigate("Home")} style={styles.itemNav}>
-          <Ionicons name="home" size={26} color="#000" />
-          <Text style={[dynamicStyles.textoNav, { color: "#000", fontWeight: "900" }]}>Inicio</Text>
+      {/* Footer */}
+      <View
+        style={[
+          styles.footer,
+          { backgroundColor: theme.primary },
+        ]}
+      >
+        <TouchableOpacity
+          style={styles.footerItem}
+          onPress={() => navigation.navigate("Home")}
+        >
+          <Ionicons name="home-outline" size={26} color={"#000"} />
         </TouchableOpacity>
 
-        <TouchableOpacity onPress={() => navigation.navigate("Profile")} style={styles.itemNav}>
-          <Ionicons name="person-outline" size={26} color={currentColors.text} />
-          <Text style={dynamicStyles.textoNav}>Perfil</Text>
+        <TouchableOpacity
+          style={styles.footerItem}
+          onPress={() => navigation.navigate("Profile")}
+        >
+          <Ionicons name="person-outline" size={26} color={"#000"} />
         </TouchableOpacity>
       </View>
 
-      <DrawerMenu
-        isOpen={isDrawerOpen}
-        onClose={toggleDrawer}
-        navigation={navigation}
-        confirmarCerrarSesion={confirmarCerrarSesion}
-        user={user}
-        setAlertConfig={setAlertConfig}
-        setAlertVisible={setAlertVisible}
-        isDarkMode={isDarkMode}
-        toggleDarkMode={toggleDarkMode}
-      />
-
+      {/* Alert genérica */}
       <CustomAlert
         isVisible={alertVisible}
-        type={alertConfig.type}
-        message={alertConfig.message}
-        customTitle={alertConfig.customTitle}
-        onConfirm={alertConfig.onConfirm}
-        onCancel={alertConfig.onCancel}
+        type="info"
+        message="Módulo en desarrollo."
+        customTitle="Próximamente"
+        onConfirm={() => setAlertVisible(false)}
       />
     </View>
   );
 }
 
-const drawerStyles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
-    justifyContent: "flex-start",
-    flexDirection: "row",
-  },
-  drawer: {
-    width: DRAWER_WIDTH,
-    paddingTop: Platform.OS === "ios" ? 40 : 20,
-    height: "100%",
-  },
-  profileHeaderBackground: {
-    width: "100%",
-    height: 180,
-  },
-  profileHeaderOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0, 0, 0, 0.65)",
-    padding: 20,
-    justifyContent: "flex-end",
-    alignItems: "flex-start",
-  },
-  profileImage: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    marginBottom: 8,
-    borderWidth: 2,
-    borderColor: "#FFD600",
-  },
-  profileName: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: "#fff",
-    width: "100%",
-    textAlign: "left",
-  },
-  profileEmail: {
-    fontSize: 12,
-    color: "#ccc",
-    marginTop: 2,
-    width: "100%",
-    textAlign: "left",
-  },
-  drawerItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 15,
-    paddingHorizontal: 20,
-    borderBottomWidth: 1,
-  },
-  drawerItemLabel: {
-    marginLeft: 15,
-    fontSize: 16,
-    fontWeight: "500",
-  },
-});
-
-// Estilos generales
 const styles = StyleSheet.create({
+  container: { flex: 1 },
+
   headerBackground: {
     width: "100%",
     height: 180,
     justifyContent: "center",
   },
-  headerOverlay: {
-    ...StyleSheet.absoluteFillObject,
-  },
+  headerOverlay: { ...StyleSheet.absoluteFillObject },
   headerContent: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
     paddingTop: Platform.OS === "ios" ? 40 : 20,
   },
-  logoGrande: {
-    width: 120,
-    height: 120,
-  },
-  headerMenuButton: {
-    position: "absolute",
-    top: Platform.OS === "ios" ? 50 : 30,
-    left: 20,
-    padding: 5,
-    borderRadius: 50,
-  },
-  headerLogoutButton: {
-    position: "absolute",
-    top: Platform.OS === "ios" ? 50 : 30,
-    right: 20,
-    padding: 5,
-    width: 38,
-    height: 38,
-    opacity: 0,
-  },
+  logoGrande: { width: 120, height: 120 },
+
   title: {
     fontSize: 26,
     fontWeight: "700",
     marginTop: 20,
     marginBottom: 10,
   },
+
+  totalValueCard: {
+    borderRadius: 16,
+    padding: 20,
+    alignItems: "center",
+    marginBottom: 20,
+  },
+  totalValueLabel: {
+    fontSize: 14,
+    fontWeight: "600",
+    letterSpacing: 1.5,
+  },
+  totalValueNumber: {
+    fontSize: 36,
+    fontWeight: "900",
+    marginVertical: 5,
+  },
+
+  infoRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 20,
+  },
+
+  infoCard: {
+    flex: 1,
+    marginHorizontal: 5,
+    borderRadius: 16,
+    padding: 15,
+    alignItems: "center",
+    elevation: 5,
+  },
+  infoTitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    marginBottom: 5,
+  },
+  infoNumber: {
+    fontSize: 28,
+    fontWeight: "900",
+    marginBottom: 10,
+  },
+  infoButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 10,
+  },
+  infoButtonText: {
+    fontWeight: "700",
+  },
+
+  card: {
+    borderRadius: 16,
+    padding: 15,
+    marginBottom: 20,
+    elevation: 3,
+  },
+  cardTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    marginBottom: 10,
+  },
+
+  activityItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 6,
+  },
+  activityText: {
+    marginLeft: 8,
+    fontSize: 14,
+  },
+
+  tituloSeccion: {
+    fontSize: 20,
+    fontWeight: "700",
+    marginTop: 20,
+    marginBottom: 12,
+  },
+
   filaIconos: {
     flexDirection: "row",
     justifyContent: "space-around",
-    paddingHorizontal: 10,
+    marginBottom: 18,
+    paddingBottom: 4,
   },
-  itemNav: { alignItems: "center" },
+  cajaIcono: {
+    width: 70,
+    height: 70,
+    borderRadius: 15,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  textoIcono: {
+    fontSize: 12,
+    fontWeight: "600",
+    textAlign: "center",
+    marginTop: 5,
+  },
+
+  footer: {
+    position: "absolute",
+    bottom: 0,
+    width: "100%",
+    flexDirection: "row",
+    justifyContent: "space-around",
+    alignItems: "center",
+    height: 90,
+    paddingTop: 10,
+    paddingBottom: Platform.OS === "ios" ? 22 : 12,
+    borderTopWidth: 0,
+  },
+  footerItem: { alignItems: "center", justifyContent: "center" },
 });

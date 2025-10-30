@@ -1,22 +1,26 @@
-// screens/Products.js
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   Image,
+  ImageBackground,
   TextInput,
   ScrollView,
   KeyboardAvoidingView,
   Platform,
   Dimensions,
+  Modal as RNModal,
+  TouchableWithoutFeedback,
+  StatusBar,
+  Animated,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import Modal from "react-native-modal";
 import * as ImagePicker from "expo-image-picker";
 import { signOut } from "firebase/auth";
-import { auth, db, storage } from "../src/firebaseConfig"; // <-- AGREGADO 'storage'
+import { auth, db } from "../src/firebaseConfig";
 import {
   collection,
   addDoc,
@@ -28,32 +32,530 @@ import {
   doc,
   updateDoc,
 } from "firebase/firestore";
-// IMPORTS PARA FIREBASE STORAGE
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage"; 
 import CustomAlert from "../components/CustomAlert";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import ProductDetails from "./ProductDetails";
+
+// theme global
+import { useTheme } from "../src/theme/ThemeContext";
 
 const { width, height } = Dimensions.get("window");
 
-// Colores base: AMARILLO (Primario/Iconos) y NEGRO (Fondo/Texto)
 const PRIMARY_COLOR = "#FFD600";
-const BACKGROUND_COLOR = "#000";
-const TEXT_COLOR = "#fff";
+const HEADER_IMAGE_SOURCE = require("../assets/header.jpg");
+const LOGO_SOURCE = require("../assets/logo.png");
+const DRAWER_WIDTH = width * 0.75;
 
+/*=============================*/
+/*     CLOUDINARY (PRODUCTO)   */
+/*=============================*/
+const CLOUDINARY_URL =
+  "https://api.cloudinary.com/v1_1/dtqsvxsm9/image/upload";
+const CLOUDINARY_UPLOAD_PRESET = "producto";
+
+const uploadImageToCloudinary = async (uri) => {
+  try {
+    const formData = new FormData();
+    const ext = (uri.split(".").pop() || "jpg").toLowerCase();
+    formData.append("file", {
+      uri,
+      type: `image/${ext}`,
+      name: `photo_${Date.now()}.${ext}`,
+    });
+    formData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
+    formData.append("cloud_name", "dtqsvxsm9");
+
+    const res = await fetch(CLOUDINARY_URL, {
+      method: "POST",
+      body: formData,
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+    const data = await res.json();
+    if (res.ok && data.secure_url) return data.secure_url;
+    throw new Error(data.error?.message || "Error al subir imagen");
+  } catch (e) {
+    console.error("Cloudinary:", e);
+    throw e;
+  }
+};
+
+/*=============================*/
+/*       UI: CUSTOM HEADER     */
+/*=============================*/
+const CustomHeader = React.memo(({ onMenuPress, theme }) => {
+  const iosSafe = 52;
+  const androidSafe = (StatusBar.currentHeight || 24) + 8;
+  return (
+    <ImageBackground
+      source={HEADER_IMAGE_SOURCE}
+      style={headerStyles.headerBackground}
+      resizeMode="cover"
+    >
+      <View
+        style={[
+          headerStyles.headerOverlay,
+          { backgroundColor: theme.headerOverlay },
+        ]}
+      />
+      <View
+        style={[
+          headerStyles.headerContent,
+          { paddingTop: Platform.OS === "ios" ? iosSafe : androidSafe },
+        ]}
+      >
+        {/* Menú */}
+        <TouchableOpacity
+          style={headerStyles.headerMenuButton}
+          onPress={onMenuPress}
+          hitSlop={{ top: 12, right: 12, bottom: 12, left: 12 }}
+        >
+          <Ionicons name="menu-outline" size={28} color={theme.primary} />
+        </TouchableOpacity>
+
+        {/* Logo centrado */}
+        <View style={headerStyles.headerCenterBlock}>
+          <Image
+            source={LOGO_SOURCE}
+            style={headerStyles.logoImage}
+            resizeMode="contain"
+          />
+        </View>
+
+        {/* Spacer */}
+        <View style={{ width: 28 }} />
+      </View>
+    </ImageBackground>
+  );
+});
+
+/*=============================*/
+/*       UI: DRAWER ITEM       */
+/*=============================*/
+const DrawerItem = ({ icon, label, onPress, isCurrent, theme }) => {
+  return (
+    <TouchableOpacity
+      style={[
+        drawerStyles.drawerItem,
+        {
+          borderBottomColor: theme.border,
+        },
+        isCurrent && { backgroundColor: "rgba(255,214,0,0.2)" },
+      ]}
+      onPress={onPress}
+    >
+      <Ionicons name={icon} size={24} color={theme.textSecondary} />
+      <Text
+        style={[
+          drawerStyles.drawerItemLabel,
+          { color: theme.textSecondary },
+        ]}
+      >
+        {label}
+      </Text>
+    </TouchableOpacity>
+  );
+};
+
+/*=============================*/
+/*        UI: DRAWER MENU      */
+/*=============================*/
+const DrawerMenu = ({
+  isOpen,
+  onClose,
+  navigation,
+  confirmarCerrarSesion,
+  user,
+  theme,
+  setAlertConfig,
+  setAlertVisible,
+}) => {
+  const navigateTo = useCallback(
+    (screenName, placeholderMsg) => {
+      onClose();
+      if (screenName) {
+        navigation.navigate(screenName);
+      } else {
+        setAlertConfig({
+          type: "info",
+          message: placeholderMsg,
+          customTitle: "Próximamente",
+          onConfirm: () => setAlertVisible(false),
+        });
+        setAlertVisible(true);
+      }
+    },
+    [onClose, navigation, setAlertConfig, setAlertVisible]
+  );
+
+  const displayName = user?.displayName || "Empleado";
+  const email = user?.email || "Sin Email";
+  const photoURL = user?.photoURL;
+
+  return (
+    <RNModal animationType="fade" transparent visible={isOpen} onRequestClose={onClose}>
+      <TouchableWithoutFeedback onPress={onClose}>
+        <View style={drawerStyles.overlay}>
+          <TouchableWithoutFeedback>
+            <View
+              style={[
+                drawerStyles.drawer,
+                {
+                  backgroundColor: theme.card,
+                  borderRightColor: theme.border,
+                },
+              ]}
+            >
+              <ScrollView showsVerticalScrollIndicator={false}>
+                <ImageBackground
+                  source={require("../assets/headerhome.jpg")}
+                  style={drawerStyles.profileHeaderBackground}
+                  resizeMode="cover"
+                >
+                  <View
+                    style={[
+                      drawerStyles.profileHeaderOverlay,
+                      { backgroundColor: theme.headerOverlay },
+                    ]}
+                  >
+                    {photoURL ? (
+                      <Image
+                        source={{ uri: photoURL }}
+                        style={[
+                          drawerStyles.profileImage,
+                          { borderColor: theme.primary },
+                        ]}
+                      />
+                    ) : (
+                      <Ionicons
+                        name="person-circle-outline"
+                        size={70}
+                        color={theme.primary}
+                      />
+                    )}
+
+                    <Text
+                      style={[
+                        drawerStyles.profileName,
+                        { color: theme.text },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {displayName}
+                    </Text>
+                    <Text
+                      style={[
+                        drawerStyles.profileEmail,
+                        { color: theme.textSecondary },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {email}
+                    </Text>
+                  </View>
+                </ImageBackground>
+
+                <DrawerItem
+                  icon="home-outline"
+                  label="Inicio"
+                  onPress={() => navigateTo("Home")}
+                  theme={theme}
+                />
+
+                <DrawerItem
+                  icon="person-circle-outline"
+                  label="Perfil"
+                  onPress={() => navigateTo("Profile")}
+                  theme={theme}
+                />
+
+                <DrawerItem
+                  icon="cube-outline"
+                  label="Productos"
+                  onPress={onClose}
+                  isCurrent
+                  theme={theme}
+                />
+
+                <DrawerItem
+                  icon="people-outline"
+                  label="Empleados"
+                  onPress={() =>
+                    navigateTo(null, "Módulo de Empleados en desarrollo.")
+                  }
+                  theme={theme}
+                />
+
+                <DrawerItem
+                  icon="receipt-outline"
+                  label="Pedidos"
+                  onPress={() =>
+                    navigateTo(null, "Módulo de Pedidos en desarrollo.")
+                  }
+                  theme={theme}
+                />
+
+                <DrawerItem
+                  icon="location-outline"
+                  label="Entregas"
+                  onPress={() =>
+                    navigateTo(null, "Módulo de Entregas en desarrollo.")
+                  }
+                  theme={theme}
+                />
+
+                <DrawerItem
+                  icon="alert-circle-outline"
+                  label="Incidentes"
+                  onPress={() =>
+                    navigateTo(null, "Módulo de Incidentes en desarrollo.")
+                  }
+                  theme={theme}
+                />
+
+                <View style={{ height: 20 }} />
+
+                <DrawerItem
+                  icon="log-out-outline"
+                  label="Cerrar Sesión"
+                  onPress={() => {
+                    onClose();
+                    confirmarCerrarSesion();
+                  }}
+                  theme={theme}
+                />
+              </ScrollView>
+            </View>
+          </TouchableWithoutFeedback>
+        </View>
+      </TouchableWithoutFeedback>
+    </RNModal>
+  );
+};
+
+/*=============================*/
+/*   HELPERS DE FORMATO/UI     */
+/*=============================*/
+const formatMoney = (n = 0) =>
+  Intl.NumberFormat("es-AR", {
+    style: "currency",
+    currency: "ARS",
+    minimumFractionDigits: 2,
+  }).format(Number(n || 0));
+
+const getStockStatus = (stock) => {
+  const s = Number(stock || 0);
+  if (s <= 0) return { label: "No Disponible", text: "#fff", bg: "#E74C3C" };
+  if (s <= 10) return { label: "Poco Stock", text: "#000", bg: "#F4C542" };
+  return { label: "Disponible", text: "#000", bg: "#52D273" };
+};
+
+/*=============================*/
+/*     CARD DE PRODUCTO UI     */
+/*=============================*/
+const ProductCard = ({
+  item,
+  theme,
+  onView,
+  onEdit,
+  onDelete,
+  getCategoryColor,
+}) => {
+  const status = getStockStatus(item.stock);
+
+  return (
+    <View
+      style={[
+        styles.productCard,
+        {
+          backgroundColor: theme.card,
+          borderColor: theme.border,
+        },
+      ]}
+    >
+      {item.foto ? (
+        <Image source={{ uri: item.foto }} style={styles.productImage} />
+      ) : (
+        <View
+          style={[
+            styles.productImagePlaceholder,
+            { backgroundColor: "#222" },
+          ]}
+        >
+          <Ionicons name="image-outline" size={30} color="#ccc" />
+        </View>
+      )}
+
+      <View style={{ flex: 1, marginLeft: 12 }}>
+        <Text
+          style={[
+            styles.productName,
+            { color: theme.text },
+          ]}
+          numberOfLines={1}
+        >
+          {item.nombre}
+        </Text>
+
+        {!!item.descripcion && (
+          <Text
+            style={[
+              styles.productDetail,
+              { color: theme.textSecondary },
+            ]}
+            numberOfLines={2}
+          >
+            {item.descripcion}
+          </Text>
+        )}
+
+        <View style={{ height: 6 }} />
+
+        <Text
+          style={[
+            styles.productDetail,
+            { color: theme.textSecondary },
+          ]}
+        >
+          {formatMoney(item.precio)} <Text>/ unidad</Text>
+          {"   "}
+          <Text>Stock: </Text>
+          <Text
+            style={{
+              fontWeight: "bold",
+              color: theme.text,
+            }}
+          >
+            {item.stock}
+          </Text>
+        </Text>
+
+        <View style={styles.pillsRow}>
+          <View style={[styles.pill, { backgroundColor: status.bg }]}>
+            <Text
+              style={[
+                styles.pillText,
+                { color: status.text },
+              ]}
+            >
+              {status.label}
+            </Text>
+          </View>
+
+          <View
+            style={[
+              styles.pill,
+              { backgroundColor: getCategoryColor(item.categoria) || "#555" },
+            ]}
+          >
+            <Text style={[styles.pillText, { color: "#fff" }]}>
+              {item.categoria}
+            </Text>
+          </View>
+        </View>
+      </View>
+
+      <View style={styles.actionsCol}>
+        <TouchableOpacity
+          style={[
+            styles.iconBtn,
+            {
+              backgroundColor: "#151515",
+              borderColor: "#242424",
+            },
+          ]}
+          onPress={() => onView(item)}
+        >
+          <Ionicons name="eye-outline" size={18} color="#0ea5e9" />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.iconBtn,
+            {
+              backgroundColor: "#151515",
+              borderColor: "#242424",
+            },
+          ]}
+          onPress={() => onEdit(item)}
+        >
+          <Ionicons name="create-outline" size={18} color="#a3e635" />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.iconBtn,
+            {
+              backgroundColor: "#151515",
+              borderColor: "#242424",
+            },
+          ]}
+          onPress={() => onDelete(item.id)}
+        >
+          <Ionicons name="trash-outline" size={18} color="#ef4444" />
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+};
+
+/*=============================*/
+/*        PRODUCTS SCREEN      */
+/*=============================*/
 export default function Products({ navigation }) {
+  const insets = useSafeAreaInsets();
+  const { theme } = useTheme();
+  const currentUser = auth.currentUser;
+
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const toggleDrawer = useCallback(() => setIsDrawerOpen((p) => !p), []);
+
+  // ref para hacer scroll top cuando guardo
+  const scrollRef = useRef(null);
+
+  // Toast animado
+  const [toastMessage, setToastMessage] = useState("");
+  const [toastVisible, setToastVisible] = useState(false);
+  const toastOpacity = useRef(new Animated.Value(0)).current;
+
+  const showToast = useCallback((msg) => {
+    setToastMessage(msg);
+    setToastVisible(true);
+
+    Animated.timing(toastOpacity, {
+      toValue: 1,
+      duration: 200,
+      useNativeDriver: true,
+    }).start(() => {
+      // ocultar después de un rato
+      setTimeout(() => {
+        Animated.timing(toastOpacity, {
+          toValue: 0,
+          duration: 200,
+          useNativeDriver: true,
+        }).start(() => {
+          setToastVisible(false);
+          setToastMessage("");
+        });
+      }, 2000);
+    });
+  }, [toastOpacity]);
+
   // estados UI
-  const [menuVisible, setMenuVisible] = useState(false);
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [productos, setProductos] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false); 
+  const [isSaving, setIsSaving] = useState(false);
+
+  const [detailsVisible, setDetailsVisible] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState(null);
+
   // form
   const [nombre, setNombre] = useState("");
   const [descripcion, setDescripcion] = useState("");
   const [precio, setPrecio] = useState("");
   const [stock, setStock] = useState("");
   const [categoria, setCategoria] = useState("");
-  const [foto, setFoto] = useState(null); 
+  const [foto, setFoto] = useState(null);
 
   // búsqueda + filtros
   const [searchText, setSearchText] = useState("");
@@ -63,7 +565,7 @@ export default function Products({ navigation }) {
   // edición
   const [editingProductId, setEditingProductId] = useState(null);
 
-  // alert config (CustomAlert)
+  // alert "modal" grande (confirmar borrar, cerrar sesión, errores)
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState({
     type: "success",
@@ -73,29 +575,20 @@ export default function Products({ navigation }) {
     onCancel: () => setAlertVisible(false),
   });
 
-  const categoriasFijas = [
-    "Vajilla",
-    "Mantelería",
-    "Decoración",
-    "Salón",
-    "Cristalería",
-  ];
-
-  // Función para asignar colores a las categorías
   const getCategoryColor = (category) => {
     switch (category) {
       case "Vajilla":
-        return "#FF8C00"; // Naranja
+        return "#FF8C00";
       case "Mantelería":
-        return "#228B22"; // Verde
+        return "#228B22";
       case "Decoración":
-        return "#800080"; // Púrpura
+        return "#800080";
       case "Salón":
-        return "#00BFFF"; // Azul claro
+        return "#00BFFF";
       case "Cristalería":
-        return "#4169E1"; // Azul real
+        return "#4169E1";
       default:
-        return "#555"; // Gris por defecto
+        return "#555";
     }
   };
 
@@ -104,12 +597,10 @@ export default function Products({ navigation }) {
     const unsub = onSnapshot(
       q,
       (snapshot) => {
-        const arr = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-        setProductos(arr);
+        setProductos(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })));
         setLoading(false);
       },
-      (err) => {
-        console.log("Error al obtener productos:", err);
+      () => {
         setLoading(false);
         setAlertConfig({
           type: "error",
@@ -120,12 +611,25 @@ export default function Products({ navigation }) {
         setAlertVisible(true);
       }
     );
-
     return () => unsub();
   }, []);
 
+  const requestPermissions = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== "granted") {
+      setAlertConfig({
+        type: "warning",
+        message: "Se requieren permisos para acceder a la galería.",
+        customTitle: "Permisos",
+        onConfirm: () => setAlertVisible(false),
+      });
+      setAlertVisible(true);
+    }
+  };
+
   const pickImage = async () => {
     try {
+      await requestPermissions();
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
@@ -137,154 +641,14 @@ export default function Products({ navigation }) {
     }
   };
 
-  const uploadImage = async (uri) => {
-    if (!uri || uri.startsWith("http")) {
-      return uri; 
-    }
-
-    try {
-      const blob = await new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.onload = function () {
-          resolve(xhr.response);
-        };
-        xhr.onerror = function (e) {
-          console.log("XHR Error:", e);
-          reject(new TypeError("Network request failed"));
-        };
-        xhr.responseType = "blob";
-        xhr.open("GET", uri, true);
-        xhr.send(null);
-      });
-
-      const filename = `productos/${auth.currentUser.uid}/${Date.now()}`;
-      const storageRef = ref(storage, filename);
-
-      await uploadBytes(storageRef, blob);
-
-      blob.close(); // Liberar Blob
-
-      const url = await getDownloadURL(storageRef);
-      return url;
-    } catch (error) {
-      console.error("Error al subir imagen:", error);
-      throw new Error("Fallo la subida de la imagen.");
-    }
-  };
-  
   const onChangeNombre = (text) => {
     const cleaned = text.replace(/[0-9]/g, "");
     setNombre(cleaned);
   };
 
-  const handleSaveProduct = async () => {
-    // Validaciones
-    if (!nombre.trim() || !precio.trim() || !stock.trim() || !categoria.trim()) {
-      setAlertConfig({
-        type: "error",
-        message: "Completa todos los campos obligatorios.",
-        customTitle: "Campos faltantes",
-        onConfirm: () => setAlertVisible(false),
-      });
-      setAlertVisible(true);
-      return;
-    }
-
-    if (/\d/.test(nombre)) {
-      setAlertConfig({
-        type: "error",
-        message: "El nombre no puede contener números.",
-        customTitle: "Nombre inválido",
-        onConfirm: () => setAlertVisible(false),
-      });
-      setAlertVisible(true);
-      return;
-    }
-
-    const precioNum = Number(precio.replace(',', '.'));
-    const stockNum = Number(stock);
-
-    if (isNaN(precioNum) || isNaN(stockNum)) {
-      setAlertConfig({
-        type: "error",
-        message: "Precio y stock deben ser números válidos.",
-        customTitle: "Formato inválido",
-        onConfirm: () => setAlertVisible(false),
-      });
-      setAlertVisible(true);
-      return;
-    }
-
-    setIsSaving(true);
-
-    try {
-      let finalPhotoURL = foto;
-
-      if (foto && !foto.startsWith("http")) {
-   
-        const uploadedURL = await uploadImage(foto);
-        finalPhotoURL = uploadedURL;
-      }
-  
-      const dataToSave = {
-        nombre: nombre.trim(),
-        descripcion: descripcion.trim(),
-        precio: precioNum,
-        stock: stockNum,
-        categoria: categoria.trim(),
-        foto: finalPhotoURL, // <-- URL final del Storage
-      };
-
-      if (editingProductId) {
-        // actualizar
-        const docRef = doc(db, "products", editingProductId);
-        await updateDoc(docRef, dataToSave);
-
-        setAlertConfig({
-          type: "success",
-          message: "Producto editado con éxito.",
-          customTitle: "¡Listo!",
-          onConfirm: () => {
-            setAlertVisible(false);
-            setAddModalVisible(false);
-            resetForm();
-            setEditingProductId(null);
-          },
-        });
-        setAlertVisible(true);
-      } else {
-        // crear nuevo
-        await addDoc(collection(db, "products"), {
-          ...dataToSave,
-          createdAt: serverTimestamp(),
-          createdBy: auth.currentUser ? auth.currentUser.uid : null,
-        });
-
-        setAlertConfig({
-          type: "success",
-          message: "Producto creado con éxito.",
-          customTitle: "¡Listo!",
-          onConfirm: () => {
-            setAlertVisible(false);
-            setAddModalVisible(false);
-            resetForm();
-            setEditingProductId(null);
-          },
-        });
-        setAlertVisible(true);
-      }
-    } catch (err) {
-      console.log("Error guardar producto:", err);
-      setAlertConfig({
-        type: "error",
-        message: "Ocurrió un error al guardar/subir el producto. Intenta de nuevo.",
-        customTitle: "Error de Guardado",
-        onConfirm: () => setAlertVisible(false),
-      });
-      setAlertVisible(true);
-    } finally {
-        setIsSaving(false);
-    }
+  const handleViewProduct = (item) => {
+    setSelectedProduct(item);
+    setDetailsVisible(true);
   };
 
   const resetForm = () => {
@@ -300,34 +664,135 @@ export default function Products({ navigation }) {
   const handleEditProduct = (item) => {
     setNombre(item.nombre || "");
     setDescripcion(item.descripcion || "");
-    setPrecio(item.precio != null ? item.precio.toString() : "");
-    setStock(item.stock != null ? item.stock.toString() : "");
+    setPrecio(item.precio != null ? String(item.precio) : "");
+    setStock(item.stock != null ? String(item.stock) : "");
     setCategoria(item.categoria || "");
-    setFoto(item.foto || null); // Carga la URL de la imagen guardada
+    setFoto(item.foto || null);
     setEditingProductId(item.id);
     setAddModalVisible(true);
   };
-  
-  // ... (El resto de las funciones: confirmDeleteProduct, handleMenuNavigate, productosFiltrados)
+
+  const scrollToTop = () => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTo({ y: 0, animated: true });
+    }
+  };
+
+  const handleSaveProduct = async () => {
+    if (!nombre.trim() || !precio.trim() || !stock.trim() || !categoria.trim()) {
+      setAlertConfig({
+        type: "error",
+        message: "Por favor, completá todos los campos obligatorios para continuar.",
+        customTitle: "Campos incompletos",
+        onConfirm: () => setAlertVisible(false),
+      });
+      setAlertVisible(true);
+      return;
+    }
+    if (/\d/.test(nombre)) {
+      setAlertConfig({
+        type: "error",
+        message: "El nombre no puede contener números.",
+        customTitle: "Nombre inválido",
+        onConfirm: () => setAlertVisible(false),
+      });
+      setAlertVisible(true);
+      return;
+    }
+
+    const precioNum = Number(String(precio).replace(",", "."));
+    const stockNum = Number(stock);
+    if (isNaN(precioNum) || isNaN(stockNum)) {
+      setAlertConfig({
+        type: "error",
+        message: "Precio y stock deben ser números válidos.",
+        customTitle: "Formato inválido",
+        onConfirm: () => setAlertVisible(false),
+      });
+      setAlertVisible(true);
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      let finalPhotoURL = foto;
+      if (foto && !foto.startsWith("http")) {
+        finalPhotoURL = await uploadImageToCloudinary(foto);
+      }
+
+      const dataToSave = {
+        nombre: nombre.trim(),
+        descripcion: descripcion.trim(),
+        precio: precioNum,
+        stock: stockNum,
+        categoria: categoria.trim(),
+        foto: finalPhotoURL,
+      };
+
+      if (editingProductId) {
+        // UPDATE
+        await updateDoc(doc(db, "products", editingProductId), dataToSave);
+
+        // cierro modal y limpio
+        setAddModalVisible(false);
+        resetForm();
+        setIsSaving(false);
+
+        // voy arriba
+        scrollToTop();
+
+        // muestro toast suave
+        showToast("Producto actualizado ✅");
+
+        return;
+      }
+
+      // CREATE
+      await addDoc(collection(db, "products"), {
+        ...dataToSave,
+        createdAt: serverTimestamp(),
+        createdBy: currentUser ? currentUser.uid : null,
+      });
+
+      // cierro modal y limpio
+      setAddModalVisible(false);
+      resetForm();
+      setIsSaving(false);
+
+      // voy arriba
+      scrollToTop();
+
+      // toast
+      showToast("Producto creado ✅");
+    } catch (err) {
+      console.log("Error guardar producto:", err);
+      setIsSaving(false);
+
+      // error sí va al alert modal grande
+      setAlertConfig({
+        type: "error",
+        message:
+          "Ocurrió un inconveniente al guardar el producto. Intentá nuevamente en unos instantes.",
+        customTitle: "No se pudo completar la acción",
+        onConfirm: () => setAlertVisible(false),
+      });
+      setAlertVisible(true);
+    }
+  };
+
   const confirmDeleteProduct = (productId) => {
     setAlertConfig({
       type: "warning",
-      message: "¿Deseás eliminar este producto?",
-      customTitle: "Eliminar producto",
+      message:
+        "¿Deseás eliminar este producto? Esta acción no se puede deshacer.",
+      customTitle: "Confirmar eliminación",
       onConfirm: async () => {
         setAlertVisible(false);
         try {
-          // Nota: La eliminación de la imagen en Storage es opcional y requiere más código
           await deleteDoc(doc(db, "products", productId));
-          setAlertConfig({
-            type: "success",
-            message: "Producto eliminado.",
-            customTitle: "Eliminado",
-            onConfirm: () => setAlertVisible(false),
-          });
-          setAlertVisible(true);
+          scrollToTop();
+          showToast("Producto eliminado 🗑️");
         } catch (err) {
-          console.log("Error al eliminar:", err);
           setAlertConfig({
             type: "error",
             message: "No se pudo eliminar el producto.",
@@ -342,286 +807,255 @@ export default function Products({ navigation }) {
     setAlertVisible(true);
   };
 
-  const handleMenuNavigate = (routeName) => {
-    setMenuVisible(false);
-    if (routeName === "Logout") {
-      setAlertConfig({
-        type: "warning",
-        message: "¿Estás seguro de que deseas cerrar sesión?",
-        customTitle: "Cerrar sesión",
-        onConfirm: async () => {
-          setAlertVisible(false);
-          try {
-            await AsyncStorage.removeItem("welcomeShown");
-            await signOut(auth);
-            navigation.navigate("Login");
-          } catch (e) {
-            console.log("Error signOut:", e);
-            setAlertConfig({
-              type: "error",
-              message: "No se pudo cerrar sesión.",
-              customTitle: "Error",
-              onConfirm: () => setAlertVisible(false),
-            });
-            setAlertVisible(true);
-          }
-        },
-        onCancel: () => setAlertVisible(false),
-      });
-      setAlertVisible(true);
-      return;
-    }
-
-    const routeMap = {
-      Productos: "Products",
-      Incidentes: "Incidents",
-      Empleados: "Employees",
-      Pedidos: "Orders",
-      Alquileres: "Rentals",
-      Clientes: "Clients",
-      Entregas: "Deliveries",
-      Inicio: "Home",
-    };
-
-    const route = routeMap[routeName] || routeName;
-    navigation.navigate(route);
-  };
-
-  // ===== filtrado local final (por búsqueda + categoría) =====
   const productosFiltrados = productos
     .filter((p) => p.nombre?.toLowerCase().includes(searchText.toLowerCase()))
     .filter((p) => (filterCategory ? p.categoria === filterCategory : true))
     .sort((a, b) => (orden === "asc" ? a.precio - b.precio : b.precio - a.precio));
 
+  const confirmarCerrarSesion = useCallback(() => {
+    setAlertConfig({
+      type: "warning",
+      message: "¿Estás seguro de que deseas cerrar sesión?",
+      customTitle: "Confirmar Cierre de Sesión",
+      onConfirm: async () => {
+        setAlertVisible(false);
+        try {
+          await signOut(auth);
+        } catch (e) {
+          console.error("signOut:", e);
+        }
+      },
+      onCancel: () => setAlertVisible(false),
+    });
+    setAlertVisible(true);
+  }, []);
+
+  const formReady =
+    nombre.trim() && precio.trim() && stock.trim() && categoria.trim();
 
   return (
-    <View style={styles.container}>
-      {/* HEADER (fondo amarillo, iconos negros) */}
-      <View style={styles.header}>
-        <View style={styles.leftHeader}>
-          <TouchableOpacity onPress={() => navigation.goBack()}>
-            <Ionicons name="arrow-back" size={26} color={BACKGROUND_COLOR} />
-          </TouchableOpacity>
-          {/* Menu abre por la derecha */}
-          <TouchableOpacity onPress={() => setMenuVisible(true)} style={{ marginLeft: 15 }}>
-            <Ionicons name="menu" size={26} color={BACKGROUND_COLOR} />
-          </TouchableOpacity>
-        </View>
-        {/* Logo centrado */}
-        <Image source={require("../assets/logo.png")} style={styles.logo} resizeMode="contain" />
-        <View style={{ width: 41 }} />
-      </View>
+    <View
+      style={[
+        styles.container,
+        { backgroundColor: theme.background },
+      ]}
+    >
+      {/* HEADER */}
+      <CustomHeader onMenuPress={toggleDrawer} theme={theme} />
 
       {/* CONTENIDO */}
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 10 : 0}
       >
         <ScrollView
+          ref={scrollRef}
           style={styles.content}
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingBottom: 160 }}
+          contentContainerStyle={{ paddingBottom: 120 }}
+          keyboardShouldPersistTaps="handled"
         >
-          <Text style={styles.title}>Productos</Text>
-          <Text style={styles.subtitle}>Gestiona tus productos fácilmente</Text>
+          <Text
+            style={[
+              styles.title,
+              { color: theme.text },
+            ]}
+          >
+            Productos
+          </Text>
+          <Text
+            style={[
+              styles.subtitle,
+              { color: theme.textSecondary },
+            ]}
+          >
+            Gestiona tus productos fácilmente
+          </Text>
 
           {/* BUSCADOR */}
-          <View style={styles.searchContainer}>
-            <Ionicons name="search-outline" size={18} color="#999" style={{ marginRight: 6 }} />
+          <View
+            style={[
+              styles.searchContainer,
+              {
+                backgroundColor: theme.card,
+                borderColor: theme.border,
+              },
+            ]}
+          >
+            <Ionicons
+              name="search-outline"
+              size={18}
+              color={theme.textSecondary}
+              style={{ marginRight: 6 }}
+            />
             <TextInput
-              style={styles.searchInput}
+              style={[
+                styles.searchInput,
+                { color: theme.text },
+              ]}
               placeholder="Buscar productos..."
-              placeholderTextColor="#999"
+              placeholderTextColor={theme.textSecondary}
               value={searchText}
               onChangeText={setSearchText}
             />
             {searchText.length > 0 && (
-              <TouchableOpacity onPress={() => setSearchText("")} style={{ marginLeft: 8 }}>
-                <Ionicons name="close-circle" size={18} color="#999" />
+              <TouchableOpacity
+                onPress={() => setSearchText("")}
+                style={{ marginLeft: 8 }}
+              >
+                <Ionicons
+                  name="close-circle"
+                  size={18}
+                  color={theme.textSecondary}
+                />
               </TouchableOpacity>
             )}
           </View>
 
-          {/* FILTROS TIPO CHIPS (DEBAJO DEL BUSCADOR) */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryChipsContainer}>
+          {/* FILTROS */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.categoryChipsContainer}
+          >
             <TouchableOpacity
-              style={[styles.catFilterChip, filterCategory === "" && { backgroundColor: BACKGROUND_COLOR, borderColor: BACKGROUND_COLOR }]}
+              style={[
+                styles.catFilterChip,
+                {
+                  backgroundColor:
+                    filterCategory === "" ? theme.text : theme.card,
+                  borderColor:
+                    filterCategory === "" ? theme.text : theme.border,
+                },
+              ]}
               onPress={() => setFilterCategory("")}
             >
-              <Text style={[styles.catFilterText, filterCategory === "" && { color: PRIMARY_COLOR, fontWeight: "700" }]}>Todas</Text>
+              <Text
+                style={[
+                  styles.catFilterText,
+                  {
+                    color:
+                      filterCategory === "" ? theme.background : theme.text,
+                  },
+                ]}
+              >
+                Todas
+              </Text>
             </TouchableOpacity>
 
-            {categoriasFijas.map((c) => (
-              <TouchableOpacity
-                key={c}
-                style={[
-                  styles.catFilterChip,
-                  filterCategory === c && { backgroundColor: getCategoryColor(c), borderColor: getCategoryColor(c) },
-                ]}
-                onPress={() => setFilterCategory(filterCategory === c ? "" : c)}
-              >
-                <Text style={[styles.catFilterText, filterCategory === c && { color: TEXT_COLOR, fontWeight: "700" }]}>{c}</Text>
-              </TouchableOpacity>
-            ))}
+            {["Vajilla", "Mantelería", "Decoración", "Salón", "Cristalería"].map(
+              (c) => (
+                <TouchableOpacity
+                  key={c}
+                  style={[
+                    styles.catFilterChip,
+                    {
+                      backgroundColor:
+                        filterCategory === c
+                          ? getCategoryColor(c)
+                          : theme.card,
+                      borderColor:
+                        filterCategory === c
+                          ? getCategoryColor(c)
+                          : theme.border,
+                    },
+                  ]}
+                  onPress={() =>
+                    setFilterCategory(filterCategory === c ? "" : c)
+                  }
+                >
+                  <Text
+                    style={[
+                      styles.catFilterText,
+                      {
+                        color:
+                          filterCategory === c ? "#fff" : theme.text,
+                        fontWeight: filterCategory === c ? "700" : "600",
+                      },
+                    ]}
+                  >
+                    {c}
+                  </Text>
+                </TouchableOpacity>
+              )
+            )}
           </ScrollView>
 
-          {/* LISTADO */}
+          {/* LISTA */}
           {loading ? (
-            <Text style={{ textAlign: "center", marginTop: 30 }}>Cargando...</Text>
+            <Text
+              style={{
+                textAlign: "center",
+                marginTop: 30,
+                color: theme.textSecondary,
+              }}
+            >
+              Cargando...
+            </Text>
           ) : productosFiltrados.length > 0 ? (
             productosFiltrados.map((item) => (
-              <View key={item.id} style={styles.productCard}>
-                <View style={{ flexDirection: 'row', flex: 1 }}>
-                  {item.foto ? (
-                    <Image source={{ uri: item.foto }} style={styles.productImage} />
-                  ) : (
-                    <View style={styles.productImagePlaceholder}>
-                      <Ionicons name="image-outline" size={30} color="#ccc" />
-                    </View>
-                  )}
-
-                  <View style={{ flex: 1, marginLeft: 10 }}>
-                    <Text style={styles.productName}>{item.nombre}</Text>
-                    {item.descripcion ? <Text style={styles.productDetail}>{item.descripcion}</Text> : null}
-
-                    <Text style={styles.productDetail}>
-                      Precio: <Text style={{ fontWeight: 'bold' }}>${item.precio != null ? Number(item.precio).toFixed(2) : 'N/A'}</Text>
-                    </Text>
-                    <Text style={styles.productDetail}>
-                      Stock: <Text style={{ fontWeight: 'bold' }}>{item.stock != null ? item.stock.toString() : 'N/A'}</Text>
-                    </Text>
-
-                    {/* Color dinámico de la categoría */}
-                    <View style={[styles.categoryBadge, { backgroundColor: getCategoryColor(item.categoria) }]}>
-                      <Text style={[styles.productCategory, { color: TEXT_COLOR, fontWeight: '700' }]}>
-                        {item.categoria}
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-
-                <View style={styles.iconsRight}>
-                  <TouchableOpacity style={{ marginBottom: 10 }} onPress={() => handleEditProduct(item)}>
-                    <Ionicons name="pencil-outline" size={20} color="#000" />
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={() => confirmDeleteProduct(item.id)}>
-                    <Ionicons name="trash-outline" size={20} color="red" />
-                  </TouchableOpacity>
-                </View>
-              </View>
+              <ProductCard
+                key={item.id}
+                item={item}
+                theme={theme}
+                onView={handleViewProduct}
+                onEdit={handleEditProduct}
+                onDelete={confirmDeleteProduct}
+                getCategoryColor={getCategoryColor}
+              />
             ))
           ) : (
-            <Text style={styles.noResults}>No hay productos. Pulsá + añadir para crear uno.</Text>
+            <Text
+              style={[
+                styles.noResults,
+                { color: theme.textSecondary },
+              ]}
+            >
+              No hay productos. Pulsá + añadir para crear uno.
+            </Text>
           )}
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* FILTROS INFERIORES: Orden de precio */}
-      <View style={styles.filtersBottom}>
-        <View style={{ flexDirection: "row", alignItems: "center" }}>
-          <TouchableOpacity
-            style={[styles.filterBtn, orden === "asc" && { backgroundColor: BACKGROUND_COLOR }]}
-            onPress={() => setOrden("asc")}
-          >
-            <Text style={[styles.filterText, orden === "asc" && { fontWeight: "700", color: PRIMARY_COLOR }]}>
-              Menor a mayor
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.filterBtn, orden === "desc" && { backgroundColor: BACKGROUND_COLOR, marginLeft: 8 }]}
-            onPress={() => setOrden("desc")}
-          >
-            <Text style={[styles.filterText, orden === "desc" && { fontWeight: "700", color: PRIMARY_COLOR }]}>
-              Mayor a menor
-            </Text>
-          </TouchableOpacity>
-        </View>
-        <Text style={{ fontSize: 12, color: '#555', marginRight: 10 }}>Ordenar por Precio</Text>
-      </View>
-
-      {/* BOTÓN AÑADIR (flotante) */}
+      {/* BOTÓN AÑADIR */}
       <TouchableOpacity
-        style={styles.addButton}
+        style={[
+          styles.addButton,
+          {
+            bottom: 24 + insets.bottom,
+            backgroundColor: theme.background,
+            opacity: isSaving ? 0.6 : 1,
+          },
+        ]}
         onPress={() => {
           resetForm();
           setAddModalVisible(true);
         }}
-        disabled={isSaving} // Deshabilitar si se está guardando
+        disabled={isSaving}
       >
-        <Ionicons name="add" size={22} color={PRIMARY_COLOR} />
-        <Text style={styles.addText}>añadir</Text>
+        <Ionicons name="add" size={26} color={theme.primary} />
+        <Text
+          style={[
+            styles.addText,
+            { color: theme.primary },
+          ]}
+        >
+          añadir
+        </Text>
       </TouchableOpacity>
 
-      {/* NAV INFERIOR (fondo Primary, iconos Background) */}
-      <View style={styles.bottomNav}>
-        <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate("Home")}>
-          <Ionicons name="home" size={24} color={BACKGROUND_COLOR} />
-          <Text style={styles.navText}>Inicio</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.navItem} onPress={() => navigation.navigate("Profile")}>
-          <Ionicons name="person-outline" size={24} color={BACKGROUND_COLOR} />
-          <Text style={styles.navText}>Perfil</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* MENU LATERAL (Abre por la derecha) */}
-      <Modal
-        isVisible={menuVisible}
-        onBackdropPress={() => setMenuVisible(false)}
-        animationIn="slideInRight" 
-        animationOut="slideOutRight"
-        style={styles.menuModal}
-      >
-        <View style={styles.menuContainer}>
-          <Text style={styles.menuTitle}>Menú rápido</Text>
-
-          {[
-            "Productos", 
-            "Pedidos",
-            "Entregas",
-            "Clientes",
-            "Empleados",
-            "Alquileres",
-            "Incidentes",
-            "Inicio",
-          ].map((m) => {
-            const isCurrentScreen = m === "Productos";
-            return (
-              <TouchableOpacity
-                key={m}
-                style={[styles.menuItem, isCurrentScreen && { backgroundColor: PRIMARY_COLOR + '30', borderRadius: 8 }]} 
-                onPress={() => handleMenuNavigate(m)}
-              >
-                <Ionicons
-                  name={
-                    m === "Productos" ? "cube-outline" :
-                    m === "Pedidos" ? "receipt-outline" :
-                    m === "Entregas" ? "car-outline" :
-                    m === "Clientes" ? "people-outline" :
-                    m === "Empleados" ? "person-outline" :
-                    m === "Alquileres" ? "briefcase-outline" :
-                    m === "Incidentes" ? "alert-circle-outline" :
-                    m === "Inicio" ? "home-outline" :
-                    "ellipsis-horizontal"
-                  }
-                  size={20}
-                  color={isCurrentScreen ? PRIMARY_COLOR : BACKGROUND_COLOR} 
-                />
-                <Text style={[styles.menuItemText, isCurrentScreen && { color: PRIMARY_COLOR, fontWeight: '700' }]}>{m}</Text>
-              </TouchableOpacity>
-            );
-          })}
-
-          <View style={styles.menuFooter}>
-            <TouchableOpacity style={[styles.menuItem, { marginTop: 8 }]} onPress={() => handleMenuNavigate("Logout")}>
-              <Ionicons name="log-out-outline" size={20} color="red" />
-              <Text style={[styles.menuItemText, { color: "red" }]}>Cerrar sesión</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+      {/* DRAWER */}
+      <DrawerMenu
+        isOpen={isDrawerOpen}
+        onClose={toggleDrawer}
+        navigation={navigation}
+        confirmarCerrarSesion={confirmarCerrarSesion}
+        user={currentUser}
+        theme={theme}
+        setAlertConfig={setAlertConfig}
+        setAlertVisible={setAlertVisible}
+      />
 
       {/* MODAL AÑADIR / EDITAR */}
       <Modal
@@ -639,8 +1073,13 @@ export default function Products({ navigation }) {
           behavior={Platform.OS === "ios" ? "padding" : undefined}
           style={styles.addModalWrapperCenter}
         >
-          <ScrollView contentContainerStyle={styles.addModalCenter}>
-            <Text style={styles.addModalTitle}>{editingProductId ? "Editar producto" : "Añadir producto"}</Text>
+          <ScrollView
+            contentContainerStyle={styles.addModalCenter}
+            keyboardShouldPersistTaps="handled"
+          >
+            <Text style={styles.addModalTitle}>
+              {editingProductId ? "Editar producto" : "Añadir producto"}
+            </Text>
 
             <TextInput
               style={styles.input}
@@ -648,6 +1087,7 @@ export default function Products({ navigation }) {
               placeholderTextColor="#999"
               value={nombre}
               onChangeText={onChangeNombre}
+              editable={!isSaving}
             />
 
             <TextInput
@@ -657,6 +1097,7 @@ export default function Products({ navigation }) {
               value={descripcion}
               onChangeText={setDescripcion}
               multiline
+              editable={!isSaving}
             />
 
             <TextInput
@@ -666,6 +1107,7 @@ export default function Products({ navigation }) {
               value={precio}
               onChangeText={setPrecio}
               keyboardType="numeric"
+              editable={!isSaving}
             />
 
             <TextInput
@@ -675,50 +1117,111 @@ export default function Products({ navigation }) {
               value={stock}
               onChangeText={setStock}
               keyboardType="numeric"
+              editable={!isSaving}
             />
 
             {/* Categorías (chips) */}
             <View style={styles.categoryContainer}>
-              {categoriasFijas.map((cat) => (
+              {[
+                "Vajilla",
+                "Mantelería",
+                "Decoración",
+                "Salón",
+                "Cristalería",
+              ].map((cat) => (
                 <TouchableOpacity
                   key={cat}
                   style={[
                     styles.categoryBtn,
-                    { borderColor: getCategoryColor(cat) },
-                    categoria === cat && { backgroundColor: getCategoryColor(cat), borderWidth: 2 },
+                    {
+                      borderColor: getCategoryColor(cat),
+                      backgroundColor:
+                        categoria === cat ? getCategoryColor(cat) : "#fff",
+                      borderWidth: categoria === cat ? 2 : 1,
+                      opacity: isSaving ? 0.5 : 1,
+                    },
                   ]}
+                  disabled={isSaving}
                   onPress={() => setCategoria(cat)}
                 >
-                  <Text style={[styles.categoryText, categoria === cat && { color: TEXT_COLOR, fontWeight: "700" }]}>
+                  <Text
+                    style={[
+                      styles.categoryText,
+                      categoria === cat && {
+                        color: "#fff",
+                        fontWeight: "700",
+                      },
+                    ]}
+                  >
                     {cat}
                   </Text>
                 </TouchableOpacity>
               ))}
             </View>
 
-            {/* Image picker grande con + centrado */}
-            <TouchableOpacity style={styles.imagePickerLarge} onPress={pickImage} activeOpacity={0.8}>
+            {/* Image picker */}
+            <TouchableOpacity
+              style={styles.imagePickerLarge}
+              onPress={pickImage}
+              activeOpacity={0.8}
+              disabled={isSaving}
+            >
               {foto ? (
                 <Image source={{ uri: foto }} style={styles.previewImage} />
               ) : (
                 <View style={styles.imagePlaceholder}>
                   <Ionicons name="add" size={36} color="#000" />
-                  <Text style={styles.imagePlaceholderText}>Agregar imagen</Text>
+                  <Text style={styles.imagePlaceholderText}>
+                    Agregar imagen
+                  </Text>
                 </View>
               )}
             </TouchableOpacity>
 
-            <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 15 }}>
-              <TouchableOpacity style={styles.cancelBtn} onPress={() => { setAddModalVisible(false); resetForm(); }} disabled={isSaving}>
-                <Text style={{ color: BACKGROUND_COLOR, fontWeight: "700" }}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={styles.saveBtn} 
-                onPress={handleSaveProduct}
-                disabled={isSaving} // Deshabilitar durante la subida/guardado
+            <View
+              style={{
+                flexDirection: "row",
+                justifyContent: "space-between",
+                marginTop: 15,
+              }}
+            >
+              <TouchableOpacity
+                style={styles.cancelBtn}
+                onPress={() => {
+                  setAddModalVisible(false);
+                  resetForm();
+                }}
+                disabled={isSaving}
               >
-                <Text style={{ color: TEXT_COLOR, fontWeight: "700" }}>
-                  {isSaving ? "Guardando..." : (editingProductId ? "Guardar" : "Crear")}
+                <Text
+                  style={{
+                    color: "#000",
+                    fontWeight: "700",
+                  }}
+                >
+                  Cancelar
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.saveBtn,
+                  (!formReady || isSaving) && { opacity: 0.5 },
+                ]}
+                onPress={handleSaveProduct}
+                disabled={isSaving || !formReady}
+              >
+                <Text
+                  style={{
+                    color: "#fff",
+                    fontWeight: "700",
+                  }}
+                >
+                  {isSaving
+                    ? "Guardando..."
+                    : editingProductId
+                    ? "Guardar"
+                    : "Crear"}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -726,7 +1229,7 @@ export default function Products({ navigation }) {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* ALERTA (CustomAlert) */}
+      {/* ALERTA MODAL (confirmaciones / errores fuertes) */}
       <CustomAlert
         isVisible={alertVisible}
         type={alertConfig.type}
@@ -735,158 +1238,257 @@ export default function Products({ navigation }) {
         onConfirm={alertConfig.onConfirm}
         onCancel={alertConfig.onCancel}
       />
+
+      {/* MODAL DETALLES */}
+      <ProductDetails
+        visible={detailsVisible}
+        onClose={() => setDetailsVisible(false)}
+        product={
+          selectedProduct
+            ? {
+                nombre: selectedProduct.nombre,
+                descripcion: selectedProduct.descripcion,
+                precio: selectedProduct.precio,
+                stock: selectedProduct.stock,
+                categoria: selectedProduct.categoria,
+                estado: getStockStatus(selectedProduct.stock).label,
+                imagenes: selectedProduct.foto
+                  ? [selectedProduct.foto]
+                  : [],
+                disponibilidad: null,
+              }
+            : null
+        }
+      />
+
+      {/* TOAST FLOTANTE ABAJO DERECHA */}
+      {toastVisible && (
+        <Animated.View
+          style={[
+            styles.toastContainer,
+            {
+              bottom: 16 + insets.bottom,
+              opacity: toastOpacity,
+              backgroundColor: theme.card,
+              borderColor: theme.border,
+            },
+          ]}
+        >
+          <Ionicons
+            name="checkmark-circle-outline"
+            size={20}
+            color={theme.primary}
+            style={{ marginRight: 8 }}
+          />
+          <Text
+            style={{
+              color: theme.text,
+              fontWeight: "600",
+              fontSize: 14,
+            }}
+          >
+            {toastMessage}
+          </Text>
+        </Animated.View>
+      )}
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#fff" },
-  // Header: Fondo amarillo (PRIMARY_COLOR), Iconos negros (BACKGROUND_COLOR)
-  header: {
-    backgroundColor: PRIMARY_COLOR,
+/*=============================*/
+/*            STYLES           */
+/*=============================*/
+const headerStyles = StyleSheet.create({
+  headerBackground: {
+    height: 140,
+    width: "100%",
+    justifyContent: "flex-end",
+  },
+  headerOverlay: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  headerContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 15,
+    paddingBottom: 12,
+  },
+  headerMenuButton: { padding: 6 },
+  headerCenterBlock: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 12,
     flexDirection: "row",
     justifyContent: "center",
     alignItems: "center",
-    paddingTop: 50,
-    paddingHorizontal: 20,
-    paddingBottom: 10,
-    position: 'relative',
+    pointerEvents: "none",
   },
-  leftHeader: {
+  logoImage: { width: 70, height: 70, marginRight: 10 },
+  headerTitleText: { color: "#fff", fontSize: 22, fontWeight: "bold" },
+});
+
+const drawerStyles = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)" },
+  drawer: {
     position: "absolute",
-    left: 20,
-    top: 50,
+    top: 0,
+    left: 0,
+    width: DRAWER_WIDTH,
+    height: "100%",
+    paddingTop: 0,
+    borderRightWidth: 1,
+  },
+  profileHeaderBackground: {
+    height: 150,
+    width: "100%",
+    justifyContent: "flex-end",
+  },
+  profileHeaderOverlay: {
+    padding: 15,
+    alignItems: "flex-start",
+  },
+  profileImage: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    borderWidth: 2,
+    marginBottom: 5,
+  },
+  profileName: { fontSize: 18, fontWeight: "bold" },
+  profileEmail: { fontSize: 14 },
+  drawerItem: {
     flexDirection: "row",
     alignItems: "center",
-    zIndex: 10,
+    paddingVertical: 15,
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
   },
-  logo: { width: 100, height: 40 },
+  drawerItemLabel: {
+    marginLeft: 15,
+    fontSize: 16,
+    fontWeight: "500",
+  },
+});
 
+const styles = StyleSheet.create({
+  container: { flex: 1 },
   content: { paddingHorizontal: 20, paddingTop: 10 },
-  title: { fontSize: 28, fontWeight: "700", color: "#000", marginTop: 10 },
-  subtitle: { color: "#555", fontSize: 14, marginBottom: 15 },
+
+  title: {
+    fontSize: 28,
+    fontWeight: "800",
+    marginTop: 6,
+    textAlign: "left",
+    alignSelf: "flex-start",
+  },
+  subtitle: {
+    marginTop: 6,
+    marginBottom: 14,
+    fontSize: 14,
+    textAlign: "left",
+    alignSelf: "flex-start",
+  },
 
   searchContainer: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#F5F5F5",
     borderRadius: 20,
     paddingHorizontal: 12,
     height: 44,
     marginBottom: 10,
     borderWidth: 1,
-    borderColor: '#eee',
   },
-  searchInput: { flex: 1, fontSize: 14, color: "#000" },
+  searchInput: { flex: 1, fontSize: 14 },
 
-  // Contenedor de chips de categoría (debajo del buscador)
   categoryChipsContainer: {
     paddingVertical: 5,
-    marginBottom: 15,
+    marginBottom: 12,
   },
 
   productCard: {
-    backgroundColor: "#fff",
     borderRadius: 15,
-    padding: 15,
-    marginBottom: 10,
+    padding: 12,
+    marginBottom: 12,
     borderWidth: 1,
-    borderColor: "#eee",
     flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 1.5,
+    alignItems: "center",
   },
-  productName: { fontSize: 16, fontWeight: "700", color: "#000", marginBottom: 4 },
-  productDetail: { fontSize: 13, color: "#555", marginBottom: 2 },
-  productImage: { width: 80, height: 80, borderRadius: 8, flexShrink: 0 },
+  productName: { fontSize: 16, fontWeight: "700", marginBottom: 4 },
+  productDetail: { fontSize: 13, marginBottom: 2 },
+  productImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 8,
+    flexShrink: 0,
+  },
   productImagePlaceholder: {
     width: 80,
     height: 80,
     borderRadius: 8,
-    backgroundColor: '#F5F5F5',
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     flexShrink: 0,
   },
-  iconsRight: { alignItems: "center", justifyContent: "space-between", height: 80, marginLeft: 10 },
-
-  // Badge para la categoría en la card
-  categoryBadge: {
-    borderRadius: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    alignSelf: 'flex-start',
-    marginTop: 6,
+  actionsCol: {
+    marginLeft: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
   },
-  productCategory: { fontSize: 12 },
+  iconBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+  },
+
+  pillsRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 8,
+    alignItems: "center",
+    flexWrap: "wrap",
+  },
+  pill: {
+    height: 28,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  pillText: {
+    fontSize: 12,
+    fontWeight: "700",
+    includeFontPadding: false,
+    textAlignVertical: "center",
+  },
 
   addButton: {
     position: "absolute",
-    bottom: 88,
+    bottom: 20,
     right: 20,
-    backgroundColor: BACKGROUND_COLOR, // Fondo negro
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 30,
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    elevation: 5,
-    shadowColor: '#000',
+    borderRadius: 32,
+    paddingHorizontal: 22,
+    paddingVertical: 12,
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
+    elevation: 6,
   },
-  addText: { color: PRIMARY_COLOR, fontWeight: "700", marginLeft: 8 }, 
-
-  // Nav Inferior: Fondo amarillo 
-  bottomNav: {
-    backgroundColor: PRIMARY_COLOR,
-    flexDirection: "row",
-    justifyContent: "space-around",
-    alignItems: "center",
-    paddingVertical: 10,
-    position: "absolute",
-    bottom: 0,
-    width: "100%",
-  },
-  navItem: { alignItems: "center" },
-  navText: { fontSize: 12, fontWeight: "600", color: BACKGROUND_COLOR }, // Texto negro
-
-  menuModal: { margin: 0, justifyContent: "flex-end", alignItems: "flex-end" },
-  menuContainer: {
-    width: "70%",
-    height: "100%",
-    backgroundColor: "#fff",
-    paddingTop: 60,
-    paddingHorizontal: 18,
-    borderLeftWidth: 1,
-    borderLeftColor: "#eee",
-  },
-  menuTitle: {
-    fontSize: 18,
+  addText: {
     fontWeight: "700",
-    marginBottom: 20,
-    color: "#000",
-  },
-  menuItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 12,
-  },
-  menuItemText: {
+    marginLeft: 8,
     fontSize: 16,
-    marginLeft: 12,
-    color: "#000",
   },
-  menuFooter: { position: "absolute", bottom: 40, left: 18, right: 18 },
 
-  // Modal centrado
   centeredModal: {
     margin: 0,
     justifyContent: "center",
@@ -898,7 +1500,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     borderRadius: 12,
-    overflow: 'hidden',
+    overflow: "hidden",
   },
   addModalCenter: {
     backgroundColor: "#fff",
@@ -908,7 +1510,13 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: PRIMARY_COLOR,
   },
-  addModalTitle: { fontSize: 20, fontWeight: "700", marginBottom: 15, color: "#000", textAlign: "center" },
+  addModalTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    marginBottom: 15,
+    color: "#000",
+    textAlign: "center",
+  },
   input: {
     backgroundColor: "#F7F7F7",
     borderRadius: 8,
@@ -917,7 +1525,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
     color: "#000",
     borderWidth: 1,
-    borderColor: '#eee',
+    borderColor: "#eee",
   },
   cancelBtn: {
     backgroundColor: "#EEE",
@@ -929,7 +1537,7 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   saveBtn: {
-    backgroundColor: BACKGROUND_COLOR,
+    backgroundColor: "#000",
     paddingVertical: 12,
     paddingHorizontal: 26,
     borderRadius: 10,
@@ -937,8 +1545,6 @@ const styles = StyleSheet.create({
     flex: 1,
     marginLeft: 8,
   },
-
-  // categorías en modal
   categoryContainer: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -954,11 +1560,9 @@ const styles = StyleSheet.create({
     marginTop: 8,
     minWidth: "30%",
     alignItems: "center",
-    backgroundColor: '#fff',
+    backgroundColor: "#fff",
   },
   categoryText: { color: "#333", fontSize: 13 },
-
-  // image picker grande
   imagePickerLarge: {
     marginTop: 15,
     height: 160,
@@ -971,38 +1575,46 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   imagePlaceholder: { alignItems: "center" },
-  imagePlaceholderText: { marginTop: 8, color: "#000", fontWeight: "600" },
+  imagePlaceholderText: {
+    marginTop: 8,
+    color: "#000",
+    fontWeight: "600",
+  },
   previewImage: { width: "100%", height: "100%" },
 
-  // filtros bottom (orden de precio)
-  filtersBottom: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderTopWidth: 1,
-    borderTopColor: "#eee",
-    backgroundColor: "#fff",
-  },
-  filterBtn: {
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 16,
-    backgroundColor: "#F3F3F3",
-  },
-  filterText: { color: "#333", fontWeight: "600" },
-
-  // chips de categoría filtro 
   catFilterChip: {
-    backgroundColor: "#F3F3F3",
     borderWidth: 1,
-    borderColor: "#eee",
     paddingHorizontal: 12,
     paddingVertical: 7,
     borderRadius: 20,
     marginRight: 8,
     alignSelf: "center",
   },
-  catFilterText: { color: "#333", fontWeight: "600" },
+  catFilterText: {
+    fontWeight: "600",
+  },
+
+  noResults: {
+    textAlign: "center",
+    marginTop: 30,
+    fontSize: 14,
+  },
+
+  toastContainer: {
+    position: "absolute",
+    right: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    minWidth: 160,
+    maxWidth: width * 0.8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+    elevation: 8,
+  },
 });

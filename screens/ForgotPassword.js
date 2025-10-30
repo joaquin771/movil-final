@@ -15,9 +15,12 @@ import {
   ImageBackground,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { sendPasswordResetEmail, fetchSignInMethodsForEmail } from "firebase/auth";
+import { sendPasswordResetEmail } from "firebase/auth";
 import { auth } from "../src/firebaseConfig";
 import CustomAlert from "../components/CustomAlert";
+
+const PRIMARY_COLOR = "#FCD73E";
+const BACKGROUND_COLOR = "#000";
 
 export default function ForgotPassword({ navigation }) {
   const [email, setEmail] = useState("");
@@ -26,8 +29,23 @@ export default function ForgotPassword({ navigation }) {
   const [alertType, setAlertType] = useState("error");
   const [alertMessage, setAlertMessage] = useState("");
 
-  const validarFormatoEmail = (texto) =>
-    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(texto.trim());
+  // ⛔ SOLO gmail.com / hotmail.com
+  const validarEmailPermitido = (raw) => {
+    const t = raw.trim().toLowerCase();
+
+    // estructura mínima: algo@algo
+    if (
+      !t.includes("@") ||
+      t.split("@")[0].length === 0 ||
+      !t.split("@")[1] ||
+      t.split("@")[1].length === 0
+    ) {
+      return false;
+    }
+
+    const dominio = t.split("@")[1];
+    return dominio === "gmail.com" || dominio === "hotmail.com";
+  };
 
   const setAlert = (type, message) => {
     setAlertType(type);
@@ -36,21 +54,28 @@ export default function ForgotPassword({ navigation }) {
   };
 
   const handleReset = async () => {
-    if (!email.trim()) {
+    const correo = email.trim().toLowerCase();
+
+    if (!correo) {
       setAlert("error", "Por favor, ingresá tu correo electrónico.");
       return;
     }
 
-    if (!validarFormatoEmail(email)) {
-      setAlert("error", "Formato de correo inválido.");
+    // 🚫 dominio no permitido
+    if (!validarEmailPermitido(correo)) {
+      setEmailValido(false);
+      setAlert(
+        "error",
+        "Formato de correo inválido. "
+      );
       return;
     }
 
     try {
-      // ✅ Enviar correo para restablecer la contraseña directamente
-      await sendPasswordResetEmail(auth, email);
-      
-      // ✅ Mostrar un mensaje de éxito genérico para no revelar si el correo está registrado
+      // Firebase manda el mail de reset
+      await sendPasswordResetEmail(auth, correo);
+
+      // mensaje genérico (no revelamos si existe o no ese usuario)
       setAlert(
         "success",
         "Si el correo está registrado, te enviamos un enlace para restablecer tu contraseña."
@@ -58,14 +83,15 @@ export default function ForgotPassword({ navigation }) {
     } catch (error) {
       console.log("Error Firebase:", error.code);
 
-      // 🛑 Manejar los errores específicos de Firebase
       if (error.code === "auth/invalid-email") {
         setAlert("error", "Correo electrónico inválido.");
       } else if (error.code === "auth/network-request-failed") {
-        setAlert("error", "Error de conexión. Verificá tu red e intentá de nuevo.");
+        setAlert(
+          "error",
+          "Error de conexión. Verificá tu red e intentá de nuevo."
+        );
       } else {
-        // 🛑 Para cualquier otro error, incluido 'auth/user-not-found', se usa un mensaje genérico.
-        // Esto previene la enumeración de usuarios.
+        // incluye user-not-found y el resto
         setAlert("error", "Ocurrió un error. Intentá nuevamente.");
       }
     }
@@ -73,7 +99,12 @@ export default function ForgotPassword({ navigation }) {
 
   const onChangeEmail = (texto) => {
     setEmail(texto);
-    setEmailValido(validarFormatoEmail(texto));
+    // esto controla el borde rojo en vivo
+    if (texto.trim() === "") {
+      setEmailValido(true); // campo vacío -> sin error todavía
+    } else {
+      setEmailValido(validarEmailPermitido(texto));
+    }
   };
 
   return (
@@ -105,9 +136,10 @@ export default function ForgotPassword({ navigation }) {
               <Text style={styles.titulo}>Recuperar contraseña</Text>
               <Text style={styles.subtitulo}>
                 Ingrese su correo electrónico y le enviaremos un enlace para
-                restablecer su contraseña.
+                restablecer la contraseña.
               </Text>
 
+              {/* INPUT CORREO */}
               <View
                 style={[
                   styles.inputContainer,
@@ -132,9 +164,12 @@ export default function ForgotPassword({ navigation }) {
               </View>
 
               {!emailValido && email !== "" && (
-                <Text style={styles.errorText}>Correo electrónico no válido</Text>
+                <Text style={styles.errorText}>
+                  Formato de correo inválido. 
+                </Text>
               )}
 
+              {/* BOTÓN ENVIAR */}
               <TouchableOpacity
                 style={styles.boton}
                 onPress={handleReset}
@@ -143,6 +178,7 @@ export default function ForgotPassword({ navigation }) {
                 <Text style={styles.textoBoton}>Enviar correo</Text>
               </TouchableOpacity>
 
+              {/* VOLVER LOGIN */}
               <TouchableOpacity
                 onPress={() => navigation.navigate("Login")}
                 activeOpacity={0.8}
@@ -168,8 +204,9 @@ export default function ForgotPassword({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#000" },
+  safe: { flex: 1, backgroundColor: BACKGROUND_COLOR },
   scrollContainer: { flexGrow: 1, justifyContent: "space-between" },
+
   headerImgBackground: {
     width: "100%",
     height: 350,
@@ -191,6 +228,7 @@ const styles = StyleSheet.create({
     zIndex: 3,
     marginTop: 10,
   },
+
   card: {
     flex: 1,
     backgroundColor: "#fff",
@@ -199,13 +237,20 @@ const styles = StyleSheet.create({
     marginTop: -25,
     zIndex: 2,
   },
-  titulo: { fontSize: 28, fontWeight: "700", marginBottom: 12, color: "#000" },
+
+  titulo: {
+    fontSize: 28,
+    fontWeight: "700",
+    marginBottom: 12,
+    color: "#000",
+  },
   subtitulo: {
     color: "#555",
     fontSize: 14,
     marginBottom: 22,
     lineHeight: 20,
   },
+
   inputContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -218,18 +263,54 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   icon: { marginRight: 8 },
-  input: { flex: 1, color: "#000", fontSize: 16 },
-  inputError: { borderColor: "#FF4D4D", borderWidth: 2 },
-  errorText: { color: "red", fontSize: 12, marginBottom: 8 },
+
+  input: {
+    flex: 1,
+    color: "#000",
+    fontSize: 16,
+  },
+
+  inputError: {
+    borderColor: "#FF4D4D",
+    borderWidth: 2,
+  },
+
+  errorText: {
+    color: "red",
+    fontSize: 12,
+    marginBottom: 8,
+    fontWeight: "500",
+  },
+
   boton: {
-    backgroundColor: "#FCD73E",
+    backgroundColor: PRIMARY_COLOR,
     paddingVertical: 14,
     borderRadius: 25,
     alignItems: "center",
     marginTop: 6,
     marginBottom: 12,
+    shadowColor: PRIMARY_COLOR,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 5,
+    elevation: 8,
   },
-  textoBoton: { color: "#000", fontWeight: "700", fontSize: 16 },
-  volver: { textAlign: "center", color: "#000", marginTop: 6, fontSize: 14 },
-  link: { color: "#FCD73E", fontWeight: "700" },
+
+  textoBoton: {
+    color: BACKGROUND_COLOR,
+    fontWeight: "700",
+    fontSize: 16,
+  },
+
+  volver: {
+    textAlign: "center",
+    color: "#000",
+    marginTop: 6,
+    fontSize: 14,
+  },
+
+  link: {
+    color: PRIMARY_COLOR,
+    fontWeight: "700",
+  },
 });

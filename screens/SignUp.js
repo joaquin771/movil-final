@@ -88,11 +88,29 @@ export default function SignUp({ navigation }) {
     setErrores((prev) => ({ ...prev, apellido: false }));
   };
 
+  // 👇 SOLO gmail.com o hotmail.com
   const validarEmail = (texto) => {
-    const t = texto.trim();
+    const t = texto.trim().toLowerCase();
     setEmail(t);
-    const regex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    setEmailValido(regex.test(t));
+
+    // chequeo básico estructura algo@algo
+    const tieneArrobaYTexto =
+      t.includes("@") &&
+      t.split("@")[0].length > 0 &&
+      t.split("@")[1] &&
+      t.split("@")[1].length > 0;
+
+    if (!tieneArrobaYTexto) {
+      setEmailValido(false);
+      setErrores((prev) => ({ ...prev, email: false }));
+      return;
+    }
+
+    const dominio = t.split("@")[1]; // después del @
+    const permitido =
+      dominio === "gmail.com" || dominio === "hotmail.com";
+
+    setEmailValido(permitido);
     setErrores((prev) => ({ ...prev, email: false }));
   };
 
@@ -133,11 +151,19 @@ export default function SignUp({ navigation }) {
       return;
     }
 
-    if (!emailValido) {
+    // dominio permitido? (chequeo crítico ANTES de crear cuenta)
+    const lowerEmail = email.trim().toLowerCase();
+    const partes = lowerEmail.split("@");
+    const dominioVal = partes[1] || "";
+    const dominioPermitido =
+      dominioVal === "gmail.com" || dominioVal === "hotmail.com";
+
+    if (!dominioPermitido) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      setAlertType("error");
-      setAlertMessage("Ingrese un correo electrónico válido.");
       setErrores((prev) => ({ ...prev, email: true }));
+      setEmailValido(false); // fuerza el rojo visual
+      setAlertType("error");
+      setAlertMessage("Formato de correo inválido.");
       setAlertVisible(true);
       return;
     }
@@ -165,7 +191,11 @@ export default function SignUp({ navigation }) {
 
     try {
       // ✅ Crear usuario
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      const userCredential = await createUserWithEmailAndPassword(
+        auth,
+        email,
+        password
+      );
       const user = userCredential.user;
 
       // ✅ Guardar nombre y apellido en Firebase Auth
@@ -181,7 +211,9 @@ export default function SignUp({ navigation }) {
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setAlertType("success");
-      setAlertMessage("Cuenta creada exitosamente. Ahora puedes iniciar sesión.");
+      setAlertMessage(
+        "Cuenta creada exitosamente. Ahora puedes iniciar sesión."
+      );
       setAlertVisible(true);
 
       setTimeout(() => {
@@ -324,7 +356,9 @@ export default function SignUp({ navigation }) {
                 />
               </View>
               {!emailValido && email !== "" && (
-                <Text style={styles.errorText}>Ingresá un correo válido</Text>
+                <Text style={styles.errorText}>
+                  Formato de correo inválido. 
+                </Text>
               )}
 
               {/* Contraseña */}
@@ -506,7 +540,12 @@ const styles = StyleSheet.create({
   icon: { marginRight: 8 },
   input: { flex: 1, height: "100%", color: BACKGROUND_COLOR, fontSize: 16 },
   inputError: { borderColor: "#FF4D4D", borderWidth: 2 },
-  errorText: { color: "red", fontSize: 12, marginBottom: 10, marginTop: -10 },
+  errorText: {
+    color: "red",
+    fontSize: 12,
+    marginBottom: 10,
+    marginTop: -10,
+  },
   matchText: {
     textAlign: "center",
     marginBottom: 10,

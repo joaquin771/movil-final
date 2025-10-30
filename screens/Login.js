@@ -21,8 +21,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { signInWithEmailAndPassword, onAuthStateChanged } from "firebase/auth";
 import { auth } from "../src/firebaseConfig";
 import CustomAlert from "../components/CustomAlert";
-
-import * as Haptics from 'expo-haptics'; 
+import * as Haptics from "expo-haptics";
 
 const PRIMARY_COLOR = "#FCD73E"; // Amarillo del botón/link
 const BACKGROUND_COLOR = "#000"; // Negro
@@ -32,10 +31,11 @@ const BORDER_COLOR_NORMAL = "#e1e1e1";
 export default function Home({ navigation }) {
   const [email, setEmail] = useState("");
   const [emailValido, setEmailValido] = useState(true);
+  const [motivoEmailInvalido, setMotivoEmailInvalido] = useState("");
+
   const [password, setPassword] = useState("");
   const [secure, setSecure] = useState(true);
-  const [loading, setLoading] = useState(false); // Estado de carga
-
+  const [loading, setLoading] = useState(false);
 
   const [isEmailFocused, setIsEmailFocused] = useState(false);
   const [isPasswordFocused, setIsPasswordFocused] = useState(false);
@@ -46,11 +46,17 @@ export default function Home({ navigation }) {
 
   const animatedCardY = useRef(new Animated.Value(50)).current;
 
+  // ==============================
+  //  CARGA EMAIL GUARDADO + ANIM
+  // ==============================
   useEffect(() => {
     const cargarUltimoEmail = async () => {
       try {
         const ultimo = await AsyncStorage.getItem("ultimoEmail");
-        if (ultimo) setEmail(ultimo);
+        if (ultimo) {
+          setEmail(ultimo);
+          validarYSetearEmail(ultimo);
+        }
       } catch (error) {
         console.log("Error al cargar email:", error);
       }
@@ -64,59 +70,151 @@ export default function Home({ navigation }) {
     }).start();
   }, []);
 
+  // ==============================
+  //  AUTH STATE
+  // ==============================
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
+        // si ya estaba logueado podrías redirigir
+        // navigation.reset({ index: 0, routes: [{ name: "Home" }] });
       }
     });
     return unsubscribe;
   }, []);
 
-  const validarFormatoEmail = (texto) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(texto.trim());
-
-  const onChangeEmail = (texto) => {
-    const t = texto.trim();
+  // ==============================
+  //  VALIDACIÓN DE EMAIL
+  // ==============================
+  // Regla: SOLO gmail.com o hotmail.com
+  const validarYSetearEmail = (raw) => {
+    const t = raw.trim().toLowerCase();
     setEmail(t);
-    if (t === "") setEmailValido(true);
-    else setEmailValido(validarFormatoEmail(t));
+
+    // chequeo estructura básica: tiene @ y algo antes y después
+    if (
+      !t.includes("@") ||
+      t.split("@")[0].length === 0 ||
+      !t.split("@")[1] ||
+      t.split("@")[1].length === 0
+    ) {
+      setEmailValido(false);
+      setMotivoEmailInvalido(
+        "Formato de correo inválido. Solo @gmail.com o @hotmail.com"
+      );
+      return;
+    }
+
+    const dominio = t.split("@")[1]; // parte después del @
+    const permitido = dominio === "gmail.com" || dominio === "hotmail.com";
+
+    if (!permitido) {
+      setEmailValido(false);
+      setMotivoEmailInvalido(
+        "Formato de correo inválido. "
+      );
+      return;
+    }
+
+    // si pasó todo:
+    setEmailValido(true);
+    setMotivoEmailInvalido("");
   };
 
-  const handleLogin = async () => {
-    if (!email.trim() || !password.trim()) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error); 
+  const onChangeEmail = (texto) => {
+    // cada vez que tipeás, valido
+    validarYSetearEmail(texto);
+  };
 
+  // ==============================
+  //  LOGIN
+  // ==============================
+  const handleLogin = async () => {
+    const correo = email.trim().toLowerCase();
+
+    // campos vacíos
+    if (!correo || !password.trim()) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       setAlertType("error");
-      setAlertMessage("Credenciales inválidas. Verifica tus datos o regístrate.");
+      setAlertMessage(
+        "Credenciales inválidas. Verifica tus datos o regístrate."
+      );
       setAlertVisible(true);
       return;
     }
 
-    setLoading(true); // Iniciar carga
+    // dominio permitido? (doble verificación antes de mandar a Firebase)
+    if (!emailValido) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      setAlertType("error");
+      setAlertMessage(
+        "Formato de correo inválido. Solo @gmail.com o @hotmail.com."
+      );
+      setAlertVisible(true);
+      return;
+    }
+
+    setLoading(true);
 
     try {
+      await signInWithEmailAndPassword(auth, correo, password);
 
-      await signInWithEmailAndPassword(auth, email, password);
-      await AsyncStorage.setItem("ultimoEmail", email);
+      await AsyncStorage.setItem("ultimoEmail", correo);
       await AsyncStorage.setItem("alertMostrado", "true");
 
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setAlertType("success");
       setAlertMessage("Inicio de sesión exitoso.");
       setAlertVisible(true);
 
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-
+      // si querés redirigir al home real post-login:
+      // navigation.reset({
+      //   index: 0,
+      //   routes: [{ name: "Home" }],
+      // });
     } catch (error) {
-  
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error); // Feedback Háptico
-      // ==========================
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       console.log("Error Firebase:", error.code);
+
       setAlertType("error");
       setAlertMessage("Credenciales inválidas.");
       setAlertVisible(true);
     } finally {
-      setLoading(false); // Detener carga
+      setLoading(false);
     }
   };
+
+  // ==============================
+  //  ESTILOS COND DEL INPUT EMAIL
+  // ==============================
+  // Regla de borde:
+  // - si es inválido => rojo SIEMPRE
+  // - si es válido y focus => amarillo
+  // - si es válido y sin focus => gris normal
+  const getEmailContainerStyle = () => {
+    if (email !== "" && !emailValido) {
+      // inválido
+      return [styles.inputContainer, styles.inputError];
+    }
+    if (isEmailFocused) {
+      // válido + foco
+      return [styles.inputContainer, styles.inputFocused];
+    }
+    // normal
+    return [styles.inputContainer];
+  };
+
+  // color icono email
+  const getEmailIconColor = () => {
+    if (email !== "" && !emailValido) {
+      return "#FF4D4D"; // rojo si está inválido
+    }
+    return isEmailFocused ? PRIMARY_COLOR : "gray";
+  };
+
+  // color icono password
+  const getPassIconColor = () =>
+    isPasswordFocused ? PRIMARY_COLOR : "gray";
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -125,7 +223,10 @@ export default function Home({ navigation }) {
         style={{ flex: 1 }}
       >
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-          <ScrollView contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="handled">
+          <ScrollView
+            contentContainerStyle={styles.scrollContainer}
+            keyboardShouldPersistTaps="handled"
+          >
             <ImageBackground
               source={require("../assets/header.jpg")}
               style={styles.headerImgBackground}
@@ -140,26 +241,22 @@ export default function Home({ navigation }) {
               />
             </ImageBackground>
 
-            {/* Tarjeta Animada con Sombra (Mejora UX) */}
-            <Animated.View style={[
-              styles.card,
-              { transform: [{ translateY: animatedCardY }] } 
-            ]}>
+            {/* Tarjeta Animada */}
+            <Animated.View
+              style={[
+                styles.card,
+                { transform: [{ translateY: animatedCardY }] },
+              ]}
+            >
               <Text style={styles.titulo}>Inicio de sesión</Text>
 
               {/* INPUT EMAIL */}
-              <View
-                style={[
-                  styles.inputContainer,
-                  isEmailFocused && styles.inputFocused, // Estilo de Foco
-                  !emailValido && email !== "" ? styles.inputError : null,
-                ]}
-              >
-                <Ionicons 
-                  name="mail-outline" 
-                  size={20} 
-                  color={isEmailFocused ? PRIMARY_COLOR : "gray"} // Color de icono enfocado
-                  style={styles.icon} 
+              <View style={getEmailContainerStyle()}>
+                <Ionicons
+                  name="mail-outline"
+                  size={20}
+                  color={getEmailIconColor()}
+                  style={styles.icon}
                 />
                 <TextInput
                   placeholder="example@gmail.com"
@@ -174,22 +271,22 @@ export default function Home({ navigation }) {
                 />
               </View>
 
-              {!emailValido && email !== "" && (
-                <Text style={styles.errorText}>Ingresa un correo válido</Text>
+              {email !== "" && !emailValido && (
+                <Text style={styles.errorText}>{motivoEmailInvalido}</Text>
               )}
 
               {/* INPUT CONTRASEÑA */}
-              <View 
+              <View
                 style={[
                   styles.inputContainer,
-                  isPasswordFocused && styles.inputFocused, // Estilo de Foco
+                  isPasswordFocused && styles.inputFocused,
                 ]}
               >
-                <Ionicons 
-                  name="lock-closed-outline" 
-                  size={20} 
-                  color={isPasswordFocused ? PRIMARY_COLOR : "gray"} // Color de icono enfocado
-                  style={styles.icon} 
+                <Ionicons
+                  name="lock-closed-outline"
+                  size={20}
+                  color={getPassIconColor()}
+                  style={styles.icon}
                 />
                 <TextInput
                   placeholder="Contraseña"
@@ -202,25 +299,29 @@ export default function Home({ navigation }) {
                   onBlur={() => setIsPasswordFocused(false)}
                 />
                 <TouchableOpacity onPress={() => setSecure(!secure)}>
-                  <Ionicons 
-                    name={secure ? "eye-off" : "eye"} 
-                    size={20} 
-                    color={PRIMARY_COLOR} // Se usa el color primario para el botón de toggle
+                  <Ionicons
+                    name={secure ? "eye-off" : "eye"}
+                    size={20}
+                    color={PRIMARY_COLOR}
                   />
                 </TouchableOpacity>
               </View>
 
               <View style={styles.optionsRow}>
-                <TouchableOpacity onPress={() => navigation.navigate("ForgotPassword")}>
-                  <Text style={styles.olvidaste}>¿Olvidaste tu contraseña?</Text>
+                <TouchableOpacity
+                  onPress={() => navigation.navigate("ForgotPassword")}
+                >
+                  <Text style={styles.olvidaste}>
+                    ¿Olvidaste tu contraseña?
+                  </Text>
                 </TouchableOpacity>
               </View>
 
-              <TouchableOpacity 
-                style={[styles.boton, loading && styles.botonDisabled]} 
-                onPress={handleLogin} 
+              <TouchableOpacity
+                style={[styles.boton, loading && styles.botonDisabled]}
+                onPress={handleLogin}
                 activeOpacity={0.85}
-                disabled={loading} // Deshabilitar si está cargando
+                disabled={loading}
               >
                 {loading ? (
                   <ActivityIndicator color={BACKGROUND_COLOR} size="small" />
@@ -229,9 +330,13 @@ export default function Home({ navigation }) {
                 )}
               </TouchableOpacity>
 
-              <TouchableOpacity onPress={() => navigation.navigate("SignUp")} activeOpacity={0.8}>
+              <TouchableOpacity
+                onPress={() => navigation.navigate("SignUp")}
+                activeOpacity={0.8}
+              >
                 <Text style={styles.registro}>
-                  ¿No tenés una cuenta? <Text style={styles.link}>Regístrate</Text>
+                  ¿No tenés una cuenta?{" "}
+                  <Text style={styles.link}>Regístrate</Text>
                 </Text>
               </TouchableOpacity>
             </Animated.View>
@@ -260,8 +365,12 @@ const styles = StyleSheet.create({
   },
   headerImageStyle: { transform: [{ scale: 1 }] },
   logoHeader: { width: "60%", height: "60%", zIndex: 3 },
-  overlayHeader: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.65)", zIndex: 1 },
-  
+  overlayHeader: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.65)",
+    zIndex: 1,
+  },
+
   card: {
     flex: 1,
     backgroundColor: TEXT_COLOR_LIGHT,
@@ -269,15 +378,19 @@ const styles = StyleSheet.create({
     padding: 20,
     marginTop: -50,
     zIndex: 2,
-
-    shadowColor: BACKGROUND_COLOR, 
+    shadowColor: BACKGROUND_COLOR,
     shadowOffset: { width: 0, height: -5 },
     shadowOpacity: 0.2,
     shadowRadius: 15,
     elevation: 20,
   },
-  
-  titulo: { fontSize: 40, fontWeight: "700", marginBottom: 20, color: BACKGROUND_COLOR },
+
+  titulo: {
+    fontSize: 40,
+    fontWeight: "700",
+    marginBottom: 20,
+    color: BACKGROUND_COLOR,
+  },
 
   inputContainer: {
     flexDirection: "row",
@@ -290,16 +403,34 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     height: 54,
     backgroundColor: TEXT_COLOR_LIGHT,
-    transition: 'border-color 0.3s ease', // No funciona en RN, pero se pone como comentario conceptual
   },
+
   inputFocused: {
-    borderColor: PRIMARY_COLOR, // Borde Amarillo al enfocar
-    borderWidth: 2, // Borde más grueso al enfocar
+    borderColor: PRIMARY_COLOR,
+    borderWidth: 2,
   },
+
   icon: { marginRight: 8 },
-  input: { flex: 1, height: "100%", color: BACKGROUND_COLOR, fontSize: 16 },
-  inputError: { borderColor: "#FF4D4D", borderWidth: 2 },
-  errorText: { color: "red", fontSize: 12, marginBottom: 10 },
+
+  input: {
+    flex: 1,
+    height: "100%",
+    color: BACKGROUND_COLOR,
+    fontSize: 16,
+  },
+
+  inputError: {
+    borderColor: "#FF4D4D",
+    borderWidth: 2,
+  },
+
+  errorText: {
+    color: "red",
+    fontSize: 12,
+    marginBottom: 10,
+    fontWeight: "500",
+  },
+
   optionsRow: {
     flexDirection: "row",
     justifyContent: "flex-end",
@@ -307,17 +438,15 @@ const styles = StyleSheet.create({
     marginBottom: 15,
   },
   olvidaste: { color: PRIMARY_COLOR, fontSize: 14, fontWeight: "600" },
-  
-  // ESTILOS DE BOTÓN MEJORADOS
+
   boton: {
     backgroundColor: PRIMARY_COLOR,
     paddingVertical: 14,
     borderRadius: 25,
     alignItems: "center",
-    justifyContent: 'center', // Centra el ActivityIndicator
+    justifyContent: "center",
     marginTop: 30,
     marginBottom: 8,
-    // Sombra para el botón
     shadowColor: PRIMARY_COLOR,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.4,
@@ -328,6 +457,11 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   textoBoton: { color: BACKGROUND_COLOR, fontWeight: "700", fontSize: 16 },
-  registro: { textAlign: "center", color: BACKGROUND_COLOR, marginTop: 6, fontSize: 14 },
+  registro: {
+    textAlign: "center",
+    color: BACKGROUND_COLOR,
+    marginTop: 6,
+    fontSize: 14,
+  },
   link: { color: PRIMARY_COLOR, fontWeight: "700" },
 });
