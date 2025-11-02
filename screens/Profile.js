@@ -42,12 +42,19 @@ const LOGO_SOURCE = require("../assets/logo.png");
 // Opciones de género
 const GENDER_OPTIONS = ["Hombre", "Mujer", "Otros", "Prefiero no decirlo"];
 
-// Validación de DNI argentino
+// Validación de DNI argentino (validación a nivel nacional)
 const validateDNI = (dni) => {
-  const cleanDNI = dni.replace(/[^0-9]/g, "");
-  const regex = /^\d{7,8}$/;
-  if (!dni.trim()) return true;
-  return regex.test(cleanDNI);
+  const cleanDNI = String(dni).replace(/[^0-9]/g, "");
+  if (!cleanDNI) return true; // campo vacío lo manejás aparte si es requerido
+
+  // Debe tener 7 u 8 dígitos
+  if (!/^\d{7,8}$/.test(cleanDNI)) return false;
+
+  const num = parseInt(cleanDNI, 10);
+  // Rango válido nacional: 1   000000 al 99 999 999 (no aceptar 100.000.000 o más)
+  if (num < 1 || num > 99999999) return false;
+
+  return true;
 };
 
 // Header personalizado
@@ -281,6 +288,7 @@ export default function Profile({ navigation }) {
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [isGenderModalVisible, setIsGenderModalVisible] = useState(false);
   const [isDatePickerVisible, setIsDatePickerVisible] = useState(false);
+  const [tempDob, setTempDob] = useState(null);
   const [isThemeModalVisible, setIsThemeModalVisible] = useState(false);
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState({
@@ -436,17 +444,28 @@ export default function Profile({ navigation }) {
   };
 
   const handleDateChange = (event, selectedDate) => {
-    setIsDatePickerVisible(false);
-    if (event.type === "set" && selectedDate) {
-      const today = new Date();
-      if (selectedDate > today) {
-        setValidationError("La fecha de nacimiento no puede ser futura");
-        setDob(null);
-      } else {
-        setDob(selectedDate);
-        setValidationError("");
+    // Android: se cierra automáticamente y event.type indica 'set' o 'dismissed'
+    if (Platform.OS === "android") {
+      setIsDatePickerVisible(false);
+      if (event?.type === "set" && selectedDate) {
+        const today = new Date();
+        if (selectedDate > today) {
+          setValidationError("La fecha de nacimiento no puede ser futura");
+          setDob(null);
+        } else {
+          setDob(selectedDate);
+          setValidationError("");
+        }
       }
+      return;
     }
+    // iOS: actualizar tempDob mientras el spinner cambia; confirmar con Aceptar
+    if (selectedDate) setTempDob(selectedDate);
+  };
+
+  const openDatePicker = () => {
+    setTempDob(dob || new Date());
+    setIsDatePickerVisible(true);
   };
 
   const handleSave = async () => {
@@ -531,13 +550,23 @@ export default function Profile({ navigation }) {
   };
 
   const onlyLetters = (text) => {
-    const cleaned = text
-      .normalize("NFKD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[^A-Za-zÁÉÍÓÚáéíóúÑñ\s]/g, "")
-      .replace(/\s{2,}/g, " ")
-      .trimStart();
-    return cleaned;
+    // Permite letras Unicode (incluye Ñ/ñ y todas las vocales con acento),
+    // espacios, guion y apóstrofe.
+    try {
+      // usa Unicode property escapes si están soportadas
+      return text
+        .replace(/[^'\-\p{L}\s]/gu, "")
+        .replace(/\s{2,}/g, " ")
+        .trimStart();
+    } catch (e) {
+      // fallback para motores que no soporten \p{L}
+      return text
+        .normalize("NFKD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^A-Za-zÁÉÍÓÚáéíóúÑñ\s'-]/g, "")
+        .replace(/\s{2,}/g, " ")
+        .trimStart();
+    }
   };
 
   return (
@@ -936,7 +965,7 @@ export default function Profile({ navigation }) {
                 {/* Fecha de Nacimiento */}
                 <TouchableOpacity
                   style={styles.inputGroup}
-                  onPress={() => isEditing && setIsDatePickerVisible(true)}
+                  onPress={() => isEditing && openDatePicker()}
                   disabled={!isEditing}
                 >
                   <View
@@ -1107,9 +1136,7 @@ export default function Profile({ navigation }) {
                     styles.settingItem,
                     { borderBottomColor: theme.border },
                   ]}
-                  onPress={() => {
-                    console.log("ChangePassword screen not implemented yet");
-                  }}
+                  onPress={() => navigation.navigate("ChangePassword")}
                 >
                   <View style={styles.settingLeft}>
                     <Ionicons
@@ -1169,8 +1196,8 @@ export default function Profile({ navigation }) {
           </ScrollView>
         </Animated.View>
 
-        {/* Date Picker */}
-        {isDatePickerVisible && (
+        {/* Date Picker - Android / iOS */}
+        {isDatePickerVisible && Platform.OS === "android" && (
           <DateTimePicker
             value={dob || new Date()}
             mode="date"
@@ -1178,6 +1205,37 @@ export default function Profile({ navigation }) {
             onChange={handleDateChange}
             maximumDate={new Date()}
           />
+        )}
+
+        {Platform.OS === "ios" && isDatePickerVisible && (
+          <Modal
+            visible={isDatePickerVisible}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setIsDatePickerVisible(false)}
+            presentationStyle="overFullScreen"
+          >
+            <TouchableWithoutFeedback onPress={() => setIsDatePickerVisible(false)}>
+              <View style={[styles.modalOverlay, { backgroundColor: theme.modalOverlay }]} />
+            </TouchableWithoutFeedback>
+            <View style={styles.iosPickerContainer}>
+              <View style={[styles.iosPickerHeader, { backgroundColor: theme.card }]}>
+                <TouchableOpacity onPress={() => { setIsDatePickerVisible(false); setTempDob(dob); }}>
+                  <Text style={{ color: theme.textSecondary, padding: 10 }}>Cancelar</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => { setDob(tempDob); setIsDatePickerVisible(false); }}>
+                  <Text style={{ color: theme.primary, fontWeight: "700", padding: 10 }}>Aceptar</Text>
+                </TouchableOpacity>
+              </View>
+              <DateTimePicker
+                value={tempDob || new Date()}
+                mode="date"
+                display="spinner"
+                onChange={handleDateChange}
+                maximumDate={new Date()}
+              />
+            </View>
+          </Modal>
         )}
 
         {/* Modal de Género */}
@@ -1461,6 +1519,21 @@ const styles = StyleSheet.create({
     width: SCREEN_WIDTH * 0.85,
     maxWidth: 400,
     padding: 20,
+    alignItems: "center",
+  },
+  iosPickerContainer: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    overflow: "hidden",
+  },
+  iosPickerHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
     alignItems: "center",
   },
   modalTitle: {

@@ -19,6 +19,7 @@ import ForgotPassword from "../screens/ForgotPassword";
 import Products from "../screens/Products";
 import Profile from "../screens/Profile";
 import ProductDetails from "../screens/ProductDetails";
+import ChangePassword from "../screens/ChangePassword"; // <-- importar aquí
 
 const Stack = createStackNavigator();
 
@@ -79,6 +80,7 @@ export default function Navigation() {
           <>
             <Stack.Screen name="Home" component={Home} />
             <Stack.Screen name="Products" component={Products} />
+            <Stack.Screen name="ChangePassword" component={ChangePassword} />
             <Stack.Screen name="Profile" component={Profile} />
             <Stack.Screen
               name="ProductDetails"

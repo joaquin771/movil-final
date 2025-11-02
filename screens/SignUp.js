@@ -393,6 +393,59 @@ export default function SignUp({ navigation }) {
                 </TouchableOpacity>
               </View>
 
+              <Text style={styles.requisitosTitle}>Requisitos:</Text>
+
+              {/* Requisitos contraseña */}
+              <View style={styles.requisitosContainer}>
+                <View style={styles.requisitoRow}>
+                  <Ionicons
+                    name={validacionesPassword.longitud ? "checkmark-circle" : "ellipse-outline"}
+                    size={18}
+                    color={validacionesPassword.longitud ? "green" : "#999"}
+                    style={styles.requisitoIcon}
+                  />
+                  <Text style={[styles.requisitoText, { color: validacionesPassword.longitud ? "green" : "#999" }]}>
+                    Al menos 6 caracteres
+                  </Text>
+                </View>
+
+                <View style={styles.requisitoRow}>
+                  <Ionicons
+                    name={validacionesPassword.mayuscula ? "checkmark-circle" : "ellipse-outline"}
+                    size={18}
+                    color={validacionesPassword.mayuscula ? "green" : "#999"}
+                    style={styles.requisitoIcon}
+                  />
+                  <Text style={[styles.requisitoText, { color: validacionesPassword.mayuscula ? "green" : "#999" }]}>
+                    Una letra mayúscula
+                  </Text>
+                </View>
+
+                <View style={styles.requisitoRow}>
+                  <Ionicons
+                    name={validacionesPassword.minuscula ? "checkmark-circle" : "ellipse-outline"}
+                    size={18}
+                    color={validacionesPassword.minuscula ? "green" : "#999"}
+                    style={styles.requisitoIcon}
+                  />
+                  <Text style={[styles.requisitoText, { color: validacionesPassword.minuscula ? "green" : "#999" }]}>
+                    Una letra minúscula
+                  </Text>
+                </View>
+
+                <View style={styles.requisitoRow}>
+                  <Ionicons
+                    name={validacionesPassword.numero ? "checkmark-circle" : "ellipse-outline"}
+                    size={18}
+                    color={validacionesPassword.numero ? "green" : "#999"}
+                    style={styles.requisitoIcon}
+                  />
+                  <Text style={[styles.requisitoText, { color: validacionesPassword.numero ? "green" : "#999" }]}>
+                    Un número (0-9)
+                  </Text>
+                </View>
+              </View>
+
               {/* Confirmar contraseña */}
               <View
                 style={[
@@ -575,4 +628,29 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   link: { color: PRIMARY_COLOR, fontWeight: "700" },
+
+  // Nuevos estilos para requisitos de contraseña
+  requisitosContainer: {
+    marginBottom: 8,
+    paddingHorizontal: 4,
+  },
+  requisitoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 6,
+  },
+  requisitoIcon: {
+    marginRight: 10,
+  },
+  requisitoText: {
+    fontSize: 13,
+  },
+  requisitosTitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#666",
+    marginTop: 5,
+    marginBottom: 8,
+    marginLeft: 4,
+  },
 });

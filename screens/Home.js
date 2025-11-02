@@ -455,24 +455,22 @@ export default function Home({ navigation }) {
       </ScrollView>
 
       {/* Footer */}
-      <View
-        style={[
-          styles.footer,
-          { backgroundColor: theme.primary },
-        ]}
-      >
+      {/* Navegación Inferior (igual que Perfil) */}
+      <View style={[styles.navInferior, { backgroundColor: theme.primary }]}>
         <TouchableOpacity
-          style={styles.footerItem}
           onPress={() => navigation.navigate("Home")}
+          style={styles.itemNav}
         >
-          <Ionicons name="home-outline" size={26} color={"#000"} />
+          <Ionicons name="home-outline" size={26} color="#000" />
+          <Text style={[styles.textoNav, { fontWeight: "900" }]}>Inicio</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={styles.footerItem}
           onPress={() => navigation.navigate("Profile")}
+          style={styles.itemNav}
         >
-          <Ionicons name="person-outline" size={26} color={"#000"} />
+          <Ionicons name="person" size={26} color="#000" />
+          <Text style={styles.textoNav}>Perfil</Text>
         </TouchableOpacity>
       </View>
 
@@ -624,4 +622,31 @@ const styles = StyleSheet.create({
     borderTopWidth: 0,
   },
   footerItem: { alignItems: "center", justifyContent: "center" },
+  activeIconContainer: {
+    backgroundColor: "#000",
+    padding: 10,
+    borderRadius: 28,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+    elevation: 6,
+  },
+  navInferior: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    alignItems: "center",
+    paddingVertical: 10,
+    position: "absolute",
+    bottom: 0,
+    width: "100%",
+    height: 85,
+    borderTopLeftRadius: 15,
+    borderTopRightRadius: 15,
+    elevation: 10,
+  },
+  itemNav: { alignItems: "center" },
+  textoNav: { fontSize: 12, fontWeight: "600", color: "#000" },
 });
