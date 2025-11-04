@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   View,
   Text,
@@ -15,12 +15,14 @@ import {
   Animated,
   Keyboard,
   ImageBackground,
+  Alert,
+  ActionSheetIOS,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import DateTimePicker from "@react-native-community/datetimepicker";
-import { auth } from "../src/firebaseConfig";
 import { signOut, updateProfile } from "firebase/auth";
+import { auth } from "../src/firebaseConfig";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
 import { format } from "date-fns";
@@ -42,7 +44,7 @@ const LOGO_SOURCE = require("../assets/logo.png");
 // Opciones de género
 const GENDER_OPTIONS = ["Hombre", "Mujer", "Otros", "Prefiero no decirlo"];
 
-// Validación de DNI argentino (validación a nivel nacional)
+// Validación de DNI
 const validateDNI = (dni) => {
   const cleanDNI = String(dni).replace(/[^0-9]/g, "");
   if (!cleanDNI) return true; // campo vacío lo manejás aparte si es requerido
@@ -51,10 +53,16 @@ const validateDNI = (dni) => {
   if (!/^\d{7,8}$/.test(cleanDNI)) return false;
 
   const num = parseInt(cleanDNI, 10);
-  // Rango válido nacional: 1   000000 al 99 999 999 (no aceptar 100.000.000 o más)
   if (num < 1 || num > 99999999) return false;
 
   return true;
+};
+
+// Validación de teléfono
+const validatePhone = (value) => {
+  if (!value) return true; // vacío permitido si no es obligatorio
+  const digits = value.replace(/[^\d]/g, "");
+  return digits.length >= 6 && digits.length <= 15;
 };
 
 // Header personalizado
@@ -307,6 +315,7 @@ export default function Profile({ navigation }) {
   const [dni, setDni] = useState("");
   const [address, setAddress] = useState("");
   const [phone, setPhone] = useState("");
+  const [phoneError, setPhoneError] = useState("");
   const [gender, setGender] = useState("");
   const [dob, setDob] = useState(null);
   const [validationError, setValidationError] = useState("");
@@ -397,20 +406,78 @@ export default function Profile({ navigation }) {
       if (status !== "granted") {
         // silencioso
       }
+      // solicitar permiso de cámara también (para tomar foto)
+      const camera = await ImagePicker.requestCameraPermissionsAsync();
+      if (camera.status !== "granted") {
+        // silencioso
+      }
+    }
+  };
+
+  const pickFromLibrary = async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+      if (!result.canceled) {
+        setProfileImageUri(result.assets[0].uri);
+      }
+    } catch (e) {
+      console.error("pickFromLibrary:", e);
+    }
+  };
+
+  const takePhoto = async () => {
+    try {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert("Permiso denegado", "No se otorgó permiso para usar la cámara.");
+        return;
+      }
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+      if (!result.canceled) {
+        setProfileImageUri(result.assets[0].uri);
+      }
+    } catch (e) {
+      console.error("takePhoto:", e);
     }
   };
 
   const pickImage = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.8,
-    });
-
-    if (!result.canceled) {
-      setProfileImageUri(result.assets[0].uri);
+    // mostrar opciones nativas en iOS o Alert en Android
+    if (Platform.OS === "ios" && ActionSheetIOS) {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: ["Cancelar", "Tomar foto", "Elegir de la galería"],
+          cancelButtonIndex: 0,
+        },
+        (buttonIndex) => {
+          if (buttonIndex === 1) takePhoto();
+          if (buttonIndex === 2) pickFromLibrary();
+        }
+      );
+      return;
     }
+
+    // Android / otros: Alert con botones
+    Alert.alert(
+      "Seleccionar imagen",
+      "Elige una opción",
+      [
+        { text: "Cancelar", style: "cancel" },
+        { text: "Tomar foto", onPress: takePhoto },
+        { text: "Elegir de la galería", onPress: pickFromLibrary },
+      ],
+      { cancelable: true }
+    );
   };
 
   const uploadImageToCloudinary = async (imageUri) => {
@@ -428,10 +495,11 @@ export default function Profile({ navigation }) {
       const response = await fetch(CLOUDINARY_URL, {
         method: "POST",
         body: formData,
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "multipart/form-data",
-        },
+        headers:
+          {
+            Accept: "application/json",
+            "Content-Type": "multipart/form-data",
+          },
       });
 
       if (!response.ok) throw new Error("Error al subir imagen");
@@ -473,6 +541,11 @@ export default function Profile({ navigation }) {
 
     if (!validateDNI(dni)) {
       setValidationError("El DNI debe contener 7 u 8 dígitos");
+      return;
+    }
+
+    if (!validatePhone(phone)) {
+      setPhoneError("Teléfono inválido — debe tener entre 6 y 15 dígitos");
       return;
     }
 
@@ -528,10 +601,39 @@ export default function Profile({ navigation }) {
     }
   };
 
+  const confirmarCerrarSesion = useCallback(() => {
+    setAlertConfig({
+      type: "warning",
+      message: "¿Estás seguro de que deseas cerrar sesión?",
+      customTitle: "Confirmar Cierre de Sesión",
+      onConfirm: async () => {
+        setAlertVisible(false);
+        try {
+          await signOut(auth);
+          // no navigation.reset/replace aquí, igual que en Products
+        } catch (e) {
+          console.error("signOut:", e);
+          setAlertConfig({
+            type: "error",
+            customTitle: "Error",
+            message: "No se pudo cerrar sesión. Intenta nuevamente.",
+            onConfirm: () => setAlertVisible(false),
+          });
+          setAlertVisible(true);
+        }
+      },
+      onCancel: () => setAlertVisible(false),
+    });
+    setAlertVisible(true);
+  }, [setAlertConfig, setAlertVisible]);
+
+  // cerrar sesión y forzar reset de navegación al flujo de Login
   const handleLogout = async () => {
     try {
       await signOut(auth);
-      navigation.replace("Login");
+      // No usar navigation.reset() aquí
+      // El useEffect en Navigation.js detectará el cambio en auth
+      // y automáticamente cambiará isAuthenticated a false
     } catch (error) {
       console.error("Error al cerrar sesión:", error);
       setAlertConfig({
@@ -897,15 +999,41 @@ export default function Profile({ navigation }) {
                         !isEditing && styles.inputDisabled,
                       ]}
                       value={phone}
-                      onChangeText={(text) =>
-                        setPhone(text.replace(/[^\d+]/g, "").slice(0, 20))
-                      }
-                      placeholder="Ej: +5491123456789"
+                      onChangeText={(text) => {
+                        // permitir + solo al inicio y solo dígitos después
+                        let v = text.replace(/[^\d+]/g, "");
+                        if (v.indexOf("+") > 0) {
+                          // eliminar signos + que no estén al inicio
+                          v = v.replace(/\+/g, "");
+                        }
+                        if (v.startsWith("+")) {
+                          const digits = v.slice(1).replace(/\D/g, "").slice(0, 15);
+                          v = "+" + digits;
+                        } else {
+                          v = v.replace(/\D/g, "").slice(0, 15);
+                        }
+                        setPhone(v);
+                        setPhoneError("");
+                      }}
+                      placeholder="Ej: +5491112345678 o 91112345678"
                       placeholderTextColor={theme.textSecondary}
                       keyboardType="phone-pad"
                       editable={isEditing}
-                      maxLength={20}
                     />
+                    {phoneError ? (
+                      <Text style={[styles.errorText, { color: theme.error }]}>
+                        {phoneError}
+                      </Text>
+                    ) : (
+                      <Text
+                        style={[
+                          styles.helperText,
+                          { color: theme.textSecondary },
+                        ]}
+                      >
+                        Formato: +[código país][número] o [número]. 6-15 dígitos.
+                      </Text>
+                    )}
                   </View>
                 </View>
 
@@ -1062,7 +1190,7 @@ export default function Profile({ navigation }) {
                 <TouchableOpacity
                   style={[
                     styles.settingItem,
-                    { borderBottomColor: theme.border },
+                    { borderBottomColor: "transparent" },
                   ]}
                   onPress={handleThemeChange}
                 >
@@ -1097,44 +1225,24 @@ export default function Profile({ navigation }) {
                     />
                   </View>
                 </TouchableOpacity>
+              </View>
 
-                {/* Información */}
-                <TouchableOpacity
-                  style={[
-                    styles.settingItem,
-                    { borderBottomColor: theme.border },
-                  ]}
-                  onPress={() => {
-                    console.log("Info screen not implemented yet");
-                  }}
-                >
-                  <View style={styles.settingLeft}>
-                    <Ionicons
-                      name="information-circle-outline"
-                      size={20}
-                      color={theme.primary}
-                    />
-                    <Text
-                      style={[
-                        styles.settingText,
-                        { color: theme.text },
-                      ]}
-                    >
-                      Información
-                    </Text>
-                  </View>
-                  <Ionicons
-                    name="chevron-forward"
-                    size={20}
-                    color={theme.textSecondary}
-                  />
-                </TouchableOpacity>
+              {/* Seguridad */}
+              <View
+                style={[
+                  styles.settingsCard,
+                  { backgroundColor: theme.card },
+                ]}
+              >
+                <Text style={[styles.cardTitle, { color: theme.primary }]}>
+                  Seguridad
+                </Text>
 
                 {/* Cambiar Contraseña */}
                 <TouchableOpacity
                   style={[
                     styles.settingItem,
-                    { borderBottomColor: theme.border },
+                    { borderBottomColor: "transparent" },
                   ]}
                   onPress={() => navigation.navigate("ChangePassword")}
                 >
@@ -1159,37 +1267,37 @@ export default function Profile({ navigation }) {
                     color={theme.textSecondary}
                   />
                 </TouchableOpacity>
-
-                {/* Cerrar Sesión */}
-                <TouchableOpacity
-                  style={[
-                    styles.settingItem,
-                    { borderBottomColor: "transparent" },
-                  ]}
-                  onPress={() => setShowLogoutModal(true)}
-                >
-                  <View style={styles.settingLeft}>
-                    <Ionicons
-                      name="log-out-outline"
-                      size={20}
-                      color={theme.error}
-                    />
-                    <Text
-                      style={[
-                        styles.settingText,
-                        { color: theme.error },
-                      ]}
-                    >
-                      Cerrar Sesión
-                    </Text>
-                  </View>
-                  <Ionicons
-                    name="chevron-forward"
-                    size={20}
-                    color={theme.textSecondary}
-                  />
-                </TouchableOpacity>
               </View>
+
+              {/* Botón Cerrar Sesión */}
+              <TouchableOpacity
+                style={styles.logoutButton}
+                onPress={() => setShowLogoutModal(true)}
+              >
+                <View
+                  style={[
+                    styles.logoutButtonContent,
+                    { 
+                      backgroundColor: theme.card,
+                      borderColor: theme.error + "40",
+                    },
+                  ]}
+                >
+                  <Ionicons
+                    name="log-out-outline"
+                    size={24}
+                    color={theme.error}
+                  />
+                  <Text
+                    style={[
+                      styles.logoutButtonText,
+                      { color: theme.error },
+                    ]}
+                  >
+                    Cerrar Sesión
+                  </Text>
+                </View>
+              </TouchableOpacity>
 
               <View style={{ height: 100 }} />
             </Animated.View>
@@ -1497,6 +1605,25 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
 
+  logoutButton: {
+    marginTop: 10,
+    marginBottom: 20,
+  },
+  logoutButtonContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 16,
+    paddingHorizontal: 30,
+    borderRadius: 20,
+    borderWidth: 2,
+  },
+  logoutButtonText: {
+    fontSize: 16,
+    fontWeight: "bold",
+    marginLeft: 10,
+  },
+
   navInferior: {
     flexDirection: "row",
     justifyContent: "space-around",
@@ -1614,4 +1741,8 @@ const styles = StyleSheet.create({
   settingRight: { flexDirection: "row", alignItems: "center", gap: 8 },
   settingText: { fontSize: 16 },
   settingValue: { fontSize: 14 },
+  helperText: {
+    fontSize: 12,
+    marginTop: 4,
+  },
 });

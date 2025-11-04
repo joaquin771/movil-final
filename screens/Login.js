@@ -23,9 +23,9 @@ import { auth } from "../src/firebaseConfig";
 import CustomAlert from "../components/CustomAlert";
 import * as Haptics from "expo-haptics";
 
-const PRIMARY_COLOR = "#FCD73E"; // Amarillo del botón/link
-const BACKGROUND_COLOR = "#000"; // Negro
-const TEXT_COLOR_LIGHT = "#fff"; // Blanco
+const PRIMARY_COLOR = "#FCD73E";
+const BACKGROUND_COLOR = "#000";
+const TEXT_COLOR_LIGHT = "#fff";
 const BORDER_COLOR_NORMAL = "#e1e1e1";
 
 export default function Home({ navigation }) {
@@ -36,6 +36,7 @@ export default function Home({ navigation }) {
   const [password, setPassword] = useState("");
   const [secure, setSecure] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [botonHabilitado, setBotonHabilitado] = useState(false);
 
   const [isEmailFocused, setIsEmailFocused] = useState(false);
   const [isPasswordFocused, setIsPasswordFocused] = useState(false);
@@ -45,6 +46,16 @@ export default function Home({ navigation }) {
   const [alertMessage, setAlertMessage] = useState("");
 
   const animatedCardY = useRef(new Animated.Value(50)).current;
+  const shakeAnim = useRef(new Animated.Value(0)).current;
+
+  // Shake animation
+  const shakeInput = () => {
+    Animated.sequence([
+      Animated.timing(shakeAnim, { toValue: 8, duration: 80, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: -8, duration: 80, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: 0, duration: 80, useNativeDriver: true }),
+    ]).start();
+  };
 
   // ==============================
   //  CARGA EMAIL GUARDADO + ANIM
@@ -74,57 +85,42 @@ export default function Home({ navigation }) {
   //  AUTH STATE
   // ==============================
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        // si ya estaba logueado podrías redirigir
-        // navigation.reset({ index: 0, routes: [{ name: "Home" }] });
-      }
-    });
+    const unsubscribe = onAuthStateChanged(auth, () => {});
     return unsubscribe;
   }, []);
 
   // ==============================
-  //  VALIDACIÓN DE EMAIL
+  //  VALIDACIÓN EMAIL
   // ==============================
-  // Regla: SOLO gmail.com o hotmail.com
   const validarYSetearEmail = (raw) => {
     const t = raw.trim().toLowerCase();
     setEmail(t);
 
-    // chequeo estructura básica: tiene @ y algo antes y después
-    if (
-      !t.includes("@") ||
-      t.split("@")[0].length === 0 ||
-      !t.split("@")[1] ||
-      t.split("@")[1].length === 0
-    ) {
+    if (!t.includes("@") || t.split("@")[0].length === 0 || !t.split("@")[1]) {
       setEmailValido(false);
-      setMotivoEmailInvalido(
-        "Formato de correo inválido. Solo @gmail.com o @hotmail.com"
-      );
+      setMotivoEmailInvalido("Formato inválido. Solo @gmail.com o @hotmail.com");
       return;
     }
 
-    const dominio = t.split("@")[1]; // parte después del @
+    const dominio = t.split("@")[1];
     const permitido = dominio === "gmail.com" || dominio === "hotmail.com";
 
     if (!permitido) {
       setEmailValido(false);
-      setMotivoEmailInvalido(
-        "Formato de correo inválido. "
-      );
+      setMotivoEmailInvalido("Formato inválido.");
       return;
     }
 
-    // si pasó todo:
     setEmailValido(true);
     setMotivoEmailInvalido("");
   };
 
-  const onChangeEmail = (texto) => {
-    // cada vez que tipeás, valido
-    validarYSetearEmail(texto);
-  };
+  const onChangeEmail = (texto) => validarYSetearEmail(texto);
+
+  // ✅ Habilitar botón solo si todo OK
+  useEffect(() => {
+    setBotonHabilitado(email.trim() && password.trim() && emailValido);
+  }, [email, password, emailValido]);
 
   // ==============================
   //  LOGIN
@@ -132,24 +128,11 @@ export default function Home({ navigation }) {
   const handleLogin = async () => {
     const correo = email.trim().toLowerCase();
 
-    // campos vacíos
-    if (!correo || !password.trim()) {
+    if (!emailValido || !password.trim()) {
+      shakeInput();
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       setAlertType("error");
-      setAlertMessage(
-        "Credenciales inválidas. Verifica tus datos o regístrate."
-      );
-      setAlertVisible(true);
-      return;
-    }
-
-    // dominio permitido? (doble verificación antes de mandar a Firebase)
-    if (!emailValido) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      setAlertType("error");
-      setAlertMessage(
-        "Formato de correo inválido. Solo @gmail.com o @hotmail.com."
-      );
+      setAlertMessage("Revisá los campos.");
       setAlertVisible(true);
       return;
     }
@@ -158,7 +141,6 @@ export default function Home({ navigation }) {
 
     try {
       await signInWithEmailAndPassword(auth, correo, password);
-
       await AsyncStorage.setItem("ultimoEmail", correo);
       await AsyncStorage.setItem("alertMostrado", "true");
 
@@ -166,16 +148,9 @@ export default function Home({ navigation }) {
       setAlertType("success");
       setAlertMessage("Inicio de sesión exitoso.");
       setAlertVisible(true);
-
-      // si querés redirigir al home real post-login:
-      // navigation.reset({
-      //   index: 0,
-      //   routes: [{ name: "Home" }],
-      // });
     } catch (error) {
+      shakeInput();
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      console.log("Error Firebase:", error.code);
-
       setAlertType("error");
       setAlertMessage("Credenciales inválidas.");
       setAlertVisible(true);
@@ -185,48 +160,26 @@ export default function Home({ navigation }) {
   };
 
   // ==============================
-  //  ESTILOS COND DEL INPUT EMAIL
+  //  ESTILOS INPUT
   // ==============================
-  // Regla de borde:
-  // - si es inválido => rojo SIEMPRE
-  // - si es válido y focus => amarillo
-  // - si es válido y sin focus => gris normal
   const getEmailContainerStyle = () => {
-    if (email !== "" && !emailValido) {
-      // inválido
-      return [styles.inputContainer, styles.inputError];
-    }
-    if (isEmailFocused) {
-      // válido + foco
-      return [styles.inputContainer, styles.inputFocused];
-    }
-    // normal
+    if (email !== "" && !emailValido) return [styles.inputContainer, styles.inputError];
+    if (isEmailFocused) return [styles.inputContainer, styles.inputFocused];
     return [styles.inputContainer];
   };
 
-  // color icono email
   const getEmailIconColor = () => {
-    if (email !== "" && !emailValido) {
-      return "#FF4D4D"; // rojo si está inválido
-    }
+    if (email !== "" && !emailValido) return "#FF4D4D";
     return isEmailFocused ? PRIMARY_COLOR : "gray";
   };
 
-  // color icono password
-  const getPassIconColor = () =>
-    isPasswordFocused ? PRIMARY_COLOR : "gray";
+  const getPassIconColor = () => (isPasswordFocused ? PRIMARY_COLOR : "gray");
 
   return (
     <SafeAreaView style={styles.safe}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        style={{ flex: 1 }}
-      >
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-          <ScrollView
-            contentContainerStyle={styles.scrollContainer}
-            keyboardShouldPersistTaps="handled"
-          >
+          <ScrollView contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="handled">
             <ImageBackground
               source={require("../assets/header.jpg")}
               style={styles.headerImgBackground}
@@ -234,60 +187,42 @@ export default function Home({ navigation }) {
               imageStyle={styles.headerImageStyle}
             >
               <View style={styles.overlayHeader} />
-              <Image
-                source={require("../assets/logo.png")}
-                style={styles.logoHeader}
-                resizeMode="contain"
-              />
+              <Image source={require("../assets/logo.png")} style={styles.logoHeader} resizeMode="contain" />
             </ImageBackground>
 
-            {/* Tarjeta Animada */}
-            <Animated.View
-              style={[
-                styles.card,
-                { transform: [{ translateY: animatedCardY }] },
-              ]}
-            >
+            <Animated.View style={[styles.card, { transform: [{ translateY: animatedCardY }] }]}>
               <Text style={styles.titulo}>Inicio de sesión</Text>
 
-              {/* INPUT EMAIL */}
-              <View style={getEmailContainerStyle()}>
-                <Ionicons
-                  name="mail-outline"
-                  size={20}
-                  color={getEmailIconColor()}
-                  style={styles.icon}
-                />
-                <TextInput
-                  placeholder="example@gmail.com"
-                  placeholderTextColor="#999"
-                  style={styles.input}
-                  value={email}
-                  onChangeText={onChangeEmail}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  onFocus={() => setIsEmailFocused(true)}
-                  onBlur={() => setIsEmailFocused(false)}
-                />
-              </View>
+              {/* EMAIL */}
+              <Animated.View style={{ transform: [{ translateX: shakeAnim }] }}>
+                <View style={getEmailContainerStyle()}>
+                  <Ionicons name="mail-outline" size={20} color={getEmailIconColor()} style={styles.icon} />
+                  <TextInput
+                    placeholder="example@gmail.com"
+                    placeholderTextColor="#999"
+                    style={styles.input}
+                    value={email}
+                    onChangeText={onChangeEmail}
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    onFocus={() => setIsEmailFocused(true)}
+                    onBlur={() => setIsEmailFocused(false)}
+                  />
 
-              {email !== "" && !emailValido && (
-                <Text style={styles.errorText}>{motivoEmailInvalido}</Text>
-              )}
+                  {email.length > 0 && emailValido && (
+                    <Ionicons name="checkmark-circle" size={20} color="green" />
+                  )}
+                  {email.length > 0 && !emailValido && (
+                    <Ionicons name="close-circle" size={20} color="red" />
+                  )}
+                </View>
+              </Animated.View>
 
-              {/* INPUT CONTRASEÑA */}
-              <View
-                style={[
-                  styles.inputContainer,
-                  isPasswordFocused && styles.inputFocused,
-                ]}
-              >
-                <Ionicons
-                  name="lock-closed-outline"
-                  size={20}
-                  color={getPassIconColor()}
-                  style={styles.icon}
-                />
+              {email !== "" && !emailValido && <Text style={styles.errorText}>{motivoEmailInvalido}</Text>}
+
+              {/* PASSWORD */}
+              <View style={[styles.inputContainer, isPasswordFocused && styles.inputFocused]}>
+                <Ionicons name="lock-closed-outline" size={20} color={getPassIconColor()} style={styles.icon} />
                 <TextInput
                   placeholder="Contraseña"
                   placeholderTextColor="#999"
@@ -299,29 +234,22 @@ export default function Home({ navigation }) {
                   onBlur={() => setIsPasswordFocused(false)}
                 />
                 <TouchableOpacity onPress={() => setSecure(!secure)}>
-                  <Ionicons
-                    name={secure ? "eye-off" : "eye"}
-                    size={20}
-                    color={PRIMARY_COLOR}
-                  />
+                  <Ionicons name={secure ? "eye-off" : "eye"} size={20} color={PRIMARY_COLOR} />
                 </TouchableOpacity>
               </View>
 
               <View style={styles.optionsRow}>
-                <TouchableOpacity
-                  onPress={() => navigation.navigate("ForgotPassword")}
-                >
-                  <Text style={styles.olvidaste}>
-                    ¿Olvidaste tu contraseña?
-                  </Text>
+                <TouchableOpacity onPress={() => navigation.navigate("ForgotPassword")}>
+                  <Text style={styles.olvidaste}>¿Olvidaste tu contraseña?</Text>
                 </TouchableOpacity>
               </View>
 
+              {/* BOTÓN */}
               <TouchableOpacity
-                style={[styles.boton, loading && styles.botonDisabled]}
+                style={[styles.boton, (!botonHabilitado || loading) && styles.botonDisabled]}
                 onPress={handleLogin}
+                disabled={!botonHabilitado || loading}
                 activeOpacity={0.85}
-                disabled={loading}
               >
                 {loading ? (
                   <ActivityIndicator color={BACKGROUND_COLOR} size="small" />
@@ -330,13 +258,9 @@ export default function Home({ navigation }) {
                 )}
               </TouchableOpacity>
 
-              <TouchableOpacity
-                onPress={() => navigation.navigate("SignUp")}
-                activeOpacity={0.8}
-              >
+              <TouchableOpacity onPress={() => navigation.navigate("SignUp")} activeOpacity={0.8}>
                 <Text style={styles.registro}>
-                  ¿No tenés una cuenta?{" "}
-                  <Text style={styles.link}>Regístrate</Text>
+                  ¿No tenés una cuenta? <Text style={styles.link}>Regístrate</Text>
                 </Text>
               </TouchableOpacity>
             </Animated.View>
@@ -454,7 +378,7 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   botonDisabled: {
-    opacity: 0.6,
+    opacity: 0.5,
   },
   textoBoton: { color: BACKGROUND_COLOR, fontWeight: "700", fontSize: 16 },
   registro: {
