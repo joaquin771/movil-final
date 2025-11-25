@@ -15,7 +15,6 @@ import {
   TouchableWithoutFeedback,
   StatusBar,
   Animated,
-  Alert,
   Switch,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -581,111 +580,132 @@ export default function Products({ navigation }) {
   };
 
   const handleSaveProduct = async () => {
-    if (!nombre.trim() || !precio.trim() || !stock.trim() || !categoria.trim()) {
-      setAlertConfig({
-        type: "error",
-        message: "Por favor, completá todos los campos obligatorios para continuar.",
-        customTitle: "Campos incompletos",
-        onConfirm: () => setAlertVisible(false),
-      });
-      setAlertVisible(true);
-      return;
+  // Validaciones de campos vacíos
+  if (!nombre.trim() || !precio.trim() || !stock.trim() || !categoria.trim()) {
+    setAlertConfig({
+      type: "error",
+      message: "Por favor, completá todos los campos obligatorios para continuar.",
+      customTitle: "Campos incompletos",
+      onConfirm: () => setAlertVisible(false),
+    });
+    setAlertVisible(true);
+    return;
+  }
+
+  // Validación de nombre sin números
+  if (/\d/.test(nombre)) {
+    setAlertConfig({
+      type: "error",
+      message: "El nombre no puede contener números.",
+      customTitle: "Nombre inválido",
+      onConfirm: () => setAlertVisible(false),
+    });
+    setAlertVisible(true);
+    return;
+  }
+
+  // Validación de formato numérico
+  const precioNum = Number(String(precio).replace(",", "."));
+  const stockNum = Number(stock);
+  if (isNaN(precioNum) || isNaN(stockNum)) {
+    setAlertConfig({
+      type: "error",
+      message: "Precio y stock deben ser números válidos.",
+      customTitle: "Formato inválido",
+      onConfirm: () => setAlertVisible(false),
+    });
+    setAlertVisible(true);
+    return;
+  }
+
+  setIsSaving(true);
+  try {
+    let finalPhotoURL = foto;
+    if (foto && !foto.startsWith("http")) {
+      finalPhotoURL = await uploadImageToCloudinary(foto);
     }
-    if (/\d/.test(nombre)) {
-      setAlertConfig({
-        type: "error",
-        message: "El nombre no puede contener números.",
-        customTitle: "Nombre inválido",
-        onConfirm: () => setAlertVisible(false),
-      });
-      setAlertVisible(true);
-      return;
-    }
 
-    const precioNum = Number(String(precio).replace(",", "."));
-    const stockNum = Number(stock);
-    if (isNaN(precioNum) || isNaN(stockNum)) {
-      setAlertConfig({
-        type: "error",
-        message: "Precio y stock deben ser números válidos.",
-        customTitle: "Formato inválido",
-        onConfirm: () => setAlertVisible(false),
-      });
-      setAlertVisible(true);
-      return;
-    }
+    const dataToSave = {
+      nombre: nombre.trim(),
+      descripcion: descripcion.trim(),
+      precio: precioNum,
+      stock: stockNum,
+      categoria: categoria.trim(),
+      foto: finalPhotoURL || null,
+      activo: !!activoState,
+    };
 
-    setIsSaving(true);
-    try {
-      let finalPhotoURL = foto;
-      if (foto && !foto.startsWith("http")) {
-        finalPhotoURL = await uploadImageToCloudinary(foto);
-      }
-
-      const dataToSave = {
-        nombre: nombre.trim(),
-        descripcion: descripcion.trim(),
-        precio: precioNum,
-        stock: stockNum,
-        categoria: categoria.trim(),
-        foto: finalPhotoURL || null,
-        activo: !!activoState,
-      };
-
-      if (editingProductId) {
-        await updateDoc(doc(db, "products", editingProductId), dataToSave);
-
-        setAddModalVisible(false);
-        resetForm();
-        setIsSaving(false);
-        scrollToTop();
-        showToast("Producto actualizado ✅");
-        return;
-      }
-
-      await addDoc(collection(db, "products"), {
-        ...dataToSave,
-        createdAt: serverTimestamp(),
-        createdBy: currentUser ? currentUser.uid : null,
-      });
-
+    if (editingProductId) {
+      // EDICIÓN
+      await updateDoc(doc(db, "products", editingProductId), dataToSave);
+      
+      setIsSaving(false);
       setAddModalVisible(false);
       resetForm();
-      setIsSaving(false);
       scrollToTop();
-      showToast("Producto creado ✅");
-    } catch (err) {
-      console.log("Error guardar producto:", err);
-      setIsSaving(false);
+      
+      // Alert de éxito para edición
       setAlertConfig({
-        type: "error",
-        message:
-          "Ocurrió un inconveniente al guardar el producto. Intentá nuevamente en unos instantes.",
-        customTitle: "No se pudo completar la acción",
+        type: "success",
+        customTitle: "¡Producto actualizado!",
+        message: "Los cambios se guardaron correctamente.",
         onConfirm: () => setAlertVisible(false),
       });
       setAlertVisible(true);
+      return;
     }
-  };
+
+    // CREACIÓN
+    await addDoc(collection(db, "products"), {
+      ...dataToSave,
+      createdAt: serverTimestamp(),
+      createdBy: currentUser ? currentUser.uid : null,
+    });
+
+    setIsSaving(false);
+    setAddModalVisible(false);
+    resetForm();
+    scrollToTop();
+    
+    // Alert de éxito para creación
+    setAlertConfig({
+      type: "success",
+      customTitle: "¡Producto creado!",
+      message: "El producto se agregó correctamente al inventario.",
+      onConfirm: () => setAlertVisible(false),
+    });
+    setAlertVisible(true);
+    
+  } catch (err) {
+    console.log("Error guardar producto:", err);
+    setIsSaving(false);
+    
+    // Alert de error
+    setAlertConfig({
+      type: "error",
+      message: "Ocurrió un inconveniente al guardar el producto. Intentá nuevamente en unos instantes.",
+      customTitle: "No se pudo completar la acción",
+      onConfirm: () => setAlertVisible(false),
+    });
+    setAlertVisible(true);
+  }
+};
 
   // === CANCELAR en el form: alerta nativa
   const handleCancelPress = () => {
-    Alert.alert(
-      "¡¿Deseás descartar cambios?!",
-      "Si descartás los cambios, se va a cerrar la edición y vas a volver a Gestión de Productos sin guardar nada.",
-      [
-        { text: "Cancelar", style: "cancel" },
-        {
-          text: "Descartar cambios",
-          style: "destructive",
-          onPress: () => {
-            setAddModalVisible(false);
-            resetForm();
-          },
-        },
-      ]
-    );
-  };
+  setAlertConfig({
+    type: "warning",
+    customTitle: "¿Deseás descartar cambios?",
+    message: "Si descartás los cambios, se va a cerrar la edición y vas a volver a Gestión de Productos sin guardar nada.",
+    onConfirm: () => {
+      setAlertVisible(false);
+      setAddModalVisible(false);
+      resetForm();
+    },
+    onCancel: () => setAlertVisible(false),
+  });
+  setAlertVisible(true);
+};
 
   const confirmarCerrarSesion = useCallback(() => {
     setAlertConfig({

@@ -1,5 +1,5 @@
 // screens/ProductDetails.js
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import Modal from "react-native-modal";
 import { Ionicons } from "@expo/vector-icons";
+import CustomAlert from "../components/CustomAlert";
 
 const { width } = Dimensions.get("window");
 
@@ -24,7 +25,7 @@ const COLORS = {
   blueSoft: "#E6F0FF",
   borderSoft: "#E6EEF7",
   dot: "#C7D3E6",
-  gold: "#FFD700", // borde como tu modal de "Añadir producto"
+  gold: "#FFD700",
 };
 
 const CARD_MAX_W = Math.min(width * 0.92, 520);
@@ -51,13 +52,24 @@ const getStockStatus = (stock) => {
  *  - onClose: () => void
  *  - product: { nombre, descripcion, precio, stock, categoria, estado, imagenes[] }
  *  - onViewBookings?: (product) => void
+ *  - onEdit?: (product) => Promise<void>
  */
 export default function ProductDetails({
   visible = false,
   onClose = () => {},
   onViewBookings = () => {},
+  onEdit = async () => {},
   product,
 }) {
+  const [alertVisible, setAlertVisible] = useState(false);
+  const [alertConfig, setAlertConfig] = useState({
+    type: "warning",
+    message: "",
+    onConfirm: () => {},
+    onCancel: () => {},
+    customTitle: "",
+  });
+
   // datos por defecto (los de tu mock)
   const p = useMemo(
     () =>
@@ -85,145 +97,212 @@ export default function ProductDetails({
 
   const stockInfo = getStockStatus(p.stock);
 
+  const handleEditPress = () => {
+    setAlertConfig({
+      type: "warning",
+      customTitle: "Confirmar edición",
+      message: "¿Deseas editar este producto?",
+      onConfirm: async () => {
+        setAlertVisible(false);
+        // Pequeño delay para que la animación del alert se complete
+        setTimeout(async () => {
+          try {
+            await onEdit(p);
+            // Mostrar alert de éxito
+            setAlertConfig({
+              type: "success",
+              customTitle: "¡Editado!",
+              message: "El producto se actualizó correctamente.",
+              onConfirm: () => {
+                setAlertVisible(false);
+                onClose(); // Cerrar el modal de detalles
+              },
+            });
+            setAlertVisible(true);
+          } catch (error) {
+            console.error("Error al editar:", error);
+            // Mostrar alert de error
+            setAlertConfig({
+              type: "error",
+              customTitle: "Error",
+              message: "No se pudo editar el producto. Intenta nuevamente.",
+              onConfirm: () => setAlertVisible(false),
+            });
+            setAlertVisible(true);
+          }
+        }, 300);
+      },
+      onCancel: () => setAlertVisible(false),
+    });
+    setAlertVisible(true);
+  };
+
   return (
-    <Modal
-      isVisible={visible}
-      onBackdropPress={onClose}
-      onBackButtonPress={onClose}
-      useNativeDriver
-      backdropOpacity={0.6}
-      backdropColor="#000"
-      style={styles.modal}
-    >
-      <View style={styles.card}>
-        {/* Header */}
-        <View style={styles.headerRow}>
-          <TouchableOpacity onPress={onClose} style={styles.iconBtn}>
-            <Ionicons name="close" size={20} color={COLORS.text} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Detalles del Producto</Text>
-          <View style={styles.iconBtn} />
-        </View>
-
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingBottom: 16 }}
-        >
-          {/* Galería */}
-          <View style={styles.galleryRow}>
-            <Image
-              source={{ uri: p.imagenes?.[0] }}
-              style={styles.mainImage}
-            />
-            <View style={styles.thumbsCol}>
-              <Image
-                source={{ uri: p.imagenes?.[1] || p.imagenes?.[0] }}
-                style={styles.thumb}
-              />
-              <Image
-                source={{ uri: p.imagenes?.[2] || p.imagenes?.[0] }}
-                style={styles.thumb}
-              />
-            </View>
+    <>
+      <Modal
+        isVisible={visible}
+        onBackdropPress={onClose}
+        onBackButtonPress={onClose}
+        useNativeDriver
+        backdropOpacity={0.6}
+        backdropColor="#000"
+        style={styles.modal}
+      >
+        <View style={styles.card}>
+          {/* Header */}
+          <View style={styles.headerRow}>
+            <TouchableOpacity onPress={onClose} style={styles.iconBtn}>
+              <Ionicons name="close" size={20} color={COLORS.text} />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>Detalles del Producto</Text>
+            <View style={styles.iconBtn} />
           </View>
 
-          {/* Título y chips */}
-          <Text style={styles.title} numberOfLines={2}>
-            {p.nombre || "Producto"}
-          </Text>
-          <View style={styles.chipsRow}>
-            {!!p.categoria && (
-              <View style={[styles.chip, { borderColor: "#3B82F6" }]}>
-                <Text style={styles.chipText}>{p.categoria}</Text>
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={{ paddingBottom: 16 }}
+          >
+            {/* Galería */}
+            <View style={styles.galleryRow}>
+              <Image
+                source={{ uri: p.imagenes?.[0] }}
+                style={styles.mainImage}
+              />
+              <View style={styles.thumbsCol}>
+                <Image
+                  source={{ uri: p.imagenes?.[1] || p.imagenes?.[0] }}
+                  style={styles.thumb}
+                />
+                <Image
+                  source={{ uri: p.imagenes?.[2] || p.imagenes?.[0] }}
+                  style={styles.thumb}
+                />
               </View>
-            )}
-            {!!p.estado && (
-              <View style={[styles.chip, { borderColor: "#10B981" }]}>
-                <Text style={styles.chipText}>{p.estado}</Text>
-              </View>
-            )}
-            <View
-              style={[
-                styles.chipFilled,
-                { backgroundColor: stockInfo.bg, borderColor: "transparent" },
-              ]}
-            >
-              <Text style={[styles.chipText, { color: stockInfo.fg }]}>
-                {stockInfo.label}
-              </Text>
             </View>
-          </View>
 
-          {/* Precio y Stock */}
-          <View style={styles.infoRow}>
-            <View style={styles.infoBox}>
-              <View style={styles.infoHeader}>
-                <Ionicons name="pricetag-outline" size={16} color={COLORS.blue} />
-                <Text style={[styles.infoLabel, { color: COLORS.blue }]}>
-                  Precio
+            {/* Título y chips */}
+            <Text style={styles.title} numberOfLines={2}>
+              {p.nombre || "Producto"}
+            </Text>
+            <View style={styles.chipsRow}>
+              {!!p.categoria && (
+                <View style={[styles.chip, { borderColor: "#3B82F6" }]}>
+                  <Text style={styles.chipText}>{p.categoria}</Text>
+                </View>
+              )}
+              {!!p.estado && (
+                <View style={[styles.chip, { borderColor: "#10B981" }]}>
+                  <Text style={styles.chipText}>{p.estado}</Text>
+                </View>
+              )}
+              <View
+                style={[
+                  styles.chipFilled,
+                  { backgroundColor: stockInfo.bg, borderColor: "transparent" },
+                ]}
+              >
+                <Text style={[styles.chipText, { color: stockInfo.fg }]}>
+                  {stockInfo.label}
                 </Text>
               </View>
-              <Text style={styles.infoValue}>
-                {formatMoney(p.precio)} / día
-              </Text>
             </View>
 
-            <View style={styles.infoBox}>
-              <View style={styles.infoHeader}>
-                <Ionicons name="cube-outline" size={16} color={COLORS.muted} />
-                <Text style={styles.infoLabel}>Stock</Text>
-              </View>
-              <Text style={styles.infoValue}>{String(p.stock || 0)}</Text>
-            </View>
-          </View>
-
-          {/* Descripción */}
-          {!!p.descripcion && (
-            <>
-              <Text style={styles.sectionTitle}>Descripción</Text>
-              <Text style={styles.description}>{p.descripcion}</Text>
-            </>
-          )}
-
-          {/* Disponibilidad */}
-          {!!p.disponibilidad && (
-            <>
-              <Text style={[styles.sectionTitle, { marginTop: 14 }]}>
-                Disponibilidad
-              </Text>
-              <View style={styles.availabilityBox}>
-                <View style={styles.availabilityBadge}>
-                  <Ionicons name="time-outline" size={16} color={COLORS.text} />
-                  <Text style={styles.availabilityBadgeText}>
-                    {p.disponibilidad.etiqueta || "Próxima reserva"}
+            {/* Precio y Stock */}
+            <View style={styles.infoRow}>
+              <View style={styles.infoBox}>
+                <View style={styles.infoHeader}>
+                  <Ionicons name="pricetag-outline" size={16} color={COLORS.blue} />
+                  <Text style={[styles.infoLabel, { color: COLORS.blue }]}>
+                    Precio
                   </Text>
                 </View>
-                <Text style={styles.availabilityLine}>
-                  {p.disponibilidad.rango}{" "}
-                  <Text style={{ color: COLORS.muted }}>
-                    ({p.disponibilidad.unidades} unidades)
-                  </Text>
+                <Text style={styles.infoValue}>
+                  {formatMoney(p.precio)} / día
                 </Text>
               </View>
-            </>
-          )}
 
-          {/* Botones */}
-          <TouchableOpacity
-            style={styles.primaryBtn}
-            onPress={() => onViewBookings(p)}
-            activeOpacity={0.9}
-          >
-            <Ionicons name="calendar" size={18} color="#fff" style={{ marginRight: 8 }} />
-            <Text style={styles.primaryBtnText}>Ver Reservas</Text>
-          </TouchableOpacity>
+              <View style={styles.infoBox}>
+                <View style={styles.infoHeader}>
+                  <Ionicons name="cube-outline" size={16} color={COLORS.muted} />
+                  <Text style={styles.infoLabel}>Stock</Text>
+                </View>
+                <Text style={styles.infoValue}>{String(p.stock || 0)}</Text>
+              </View>
+            </View>
 
-          <TouchableOpacity style={styles.secondaryBtn} onPress={onClose} activeOpacity={0.9}>
-            <Text style={styles.secondaryBtnText}>Cerrar</Text>
-          </TouchableOpacity>
-        </ScrollView>
-      </View>
-    </Modal>
+            {/* Descripción */}
+            {!!p.descripcion && (
+              <>
+                <Text style={styles.sectionTitle}>Descripción</Text>
+                <Text style={styles.description}>{p.descripcion}</Text>
+              </>
+            )}
+
+            {/* Disponibilidad */}
+            {!!p.disponibilidad && (
+              <>
+                <Text style={[styles.sectionTitle, { marginTop: 14 }]}>
+                  Disponibilidad
+                </Text>
+                <View style={styles.availabilityBox}>
+                  <View style={styles.availabilityBadge}>
+                    <Ionicons name="time-outline" size={16} color={COLORS.text} />
+                    <Text style={styles.availabilityBadgeText}>
+                      {p.disponibilidad.etiqueta || "Próxima reserva"}
+                    </Text>
+                  </View>
+                  <Text style={styles.availabilityLine}>
+                    {p.disponibilidad.rango}{" "}
+                    <Text style={{ color: COLORS.muted }}>
+                      ({p.disponibilidad.unidades} unidades)
+                    </Text>
+                  </Text>
+                </View>
+              </>
+            )}
+
+            {/* Botones */}
+            <TouchableOpacity
+              style={styles.primaryBtn}
+              onPress={() => onViewBookings(p)}
+              activeOpacity={0.9}
+            >
+              <Ionicons name="calendar" size={18} color="#fff" style={{ marginRight: 8 }} />
+              <Text style={styles.primaryBtnText}>Ver Reservas</Text>
+            </TouchableOpacity>
+
+            <View style={{ flexDirection: 'row', gap: 12, marginTop: 10 }}>
+              <TouchableOpacity 
+                style={styles.editBtn} 
+                onPress={handleEditPress} 
+                activeOpacity={0.9}
+              >
+                <Ionicons name="pencil" size={16} color="#111" style={{ marginRight: 8 }} />
+                <Text style={styles.editBtnText}>Editar</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={styles.secondaryBtn} 
+                onPress={onClose} 
+                activeOpacity={0.9}
+              >
+                <Text style={styles.secondaryBtnText}>Cerrar</Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* Custom Alert */}
+      <CustomAlert
+        isVisible={alertVisible}
+        type={alertConfig.type}
+        message={alertConfig.message}
+        onConfirm={alertConfig.onConfirm}
+        onCancel={alertConfig.onCancel}
+        customTitle={alertConfig.customTitle}
+      />
+    </>
   );
 }
 
@@ -239,7 +318,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.card,
     borderRadius: CARD_RADIUS,
     borderWidth: 2,
-    borderColor: COLORS.gold, // borde dorado
+    borderColor: COLORS.gold,
     padding: 16,
   },
   headerRow: {
@@ -352,11 +431,23 @@ const styles = StyleSheet.create({
   primaryBtnText: { color: "#fff", fontWeight: "800", fontSize: 15 },
 
   secondaryBtn: {
-    marginTop: 10,
+    flex: 1,
     backgroundColor: "#EFEFEF",
     paddingVertical: 12,
     borderRadius: 12,
     alignItems: "center",
   },
   secondaryBtnText: { color: COLORS.text, fontWeight: "700" },
+  
+  editBtn: {
+    flex: 1,
+    backgroundColor: COLORS.gold,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "center",
+  },
+  editBtnText: { color: "#111", fontWeight: "800" },
 });

@@ -39,20 +39,20 @@ export default function Navigation() {
 
   useEffect(() => {
     const init = async () => {
-        const loggedBefore = await AsyncStorage.getItem("hasLoggedBefore");
-        setHasLoggedBefore(!!loggedBefore);
+      const loggedBefore = await AsyncStorage.getItem("hasLoggedBefore");
+      setHasLoggedBefore(!!loggedBefore);
 
-        const unsubscribe = onAuthStateChanged(auth, (user) => {
-          setIsAuthenticated(!!user);
+      const unsubscribe = onAuthStateChanged(auth, (user) => {
+        setIsAuthenticated(!!user);
 
-          if (user) {
-            AsyncStorage.setItem("hasLoggedBefore", "true");
-          }
+        if (user) {
+          AsyncStorage.setItem("hasLoggedBefore", "true");
+        }
 
-          setIsLoading(false);
-        });
+        setIsLoading(false);
+      });
 
-        return unsubscribe;
+      return unsubscribe;
     };
 
     init();
@@ -109,6 +109,7 @@ export default function Navigation() {
     </NavigationContainer>
   );
 }
+
 
 const styles = StyleSheet.create({
   loadingContainer: {

@@ -1,24 +1,12 @@
 import React, { useState, useEffect, useRef } from "react";
 import {
-  SafeAreaView,
-  View,
-  Text,
-  TextInput,
-  StyleSheet,
-  TouchableOpacity,
-  Image,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  TouchableWithoutFeedback,
-  Keyboard,
-  ImageBackground,
-  ActivityIndicator,
-  Animated,
+  SafeAreaView, View, Text, TextInput, StyleSheet, TouchableOpacity, Image, 
+  KeyboardAvoidingView, Platform, ScrollView, TouchableWithoutFeedback, Keyboard, 
+  ImageBackground, ActivityIndicator, Animated,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { signInWithEmailAndPassword, onAuthStateChanged } from "firebase/auth";
+import { sendPasswordResetEmail, onAuthStateChanged } from "firebase/auth"; 
 import { auth } from "../src/firebaseConfig";
 import CustomAlert from "../components/CustomAlert";
 import * as Haptics from "expo-haptics";
@@ -28,18 +16,15 @@ const BACKGROUND_COLOR = "#000";
 const TEXT_COLOR_LIGHT = "#fff";
 const BORDER_COLOR_NORMAL = "#e1e1e1";
 
-export default function Home({ navigation }) {
+export default function ForgotPassword({ navigation }) {
   const [email, setEmail] = useState("");
   const [emailValido, setEmailValido] = useState(true);
   const [motivoEmailInvalido, setMotivoEmailInvalido] = useState("");
 
-  const [password, setPassword] = useState("");
-  const [secure, setSecure] = useState(true);
   const [loading, setLoading] = useState(false);
   const [botonHabilitado, setBotonHabilitado] = useState(false);
 
   const [isEmailFocused, setIsEmailFocused] = useState(false);
-  const [isPasswordFocused, setIsPasswordFocused] = useState(false);
 
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertType, setAlertType] = useState("error");
@@ -48,8 +33,8 @@ export default function Home({ navigation }) {
   const animatedCardY = useRef(new Animated.Value(50)).current;
   const shakeAnim = useRef(new Animated.Value(0)).current;
 
-  // Shake animation
   const shakeInput = () => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     Animated.sequence([
       Animated.timing(shakeAnim, { toValue: 8, duration: 80, useNativeDriver: true }),
       Animated.timing(shakeAnim, { toValue: -8, duration: 80, useNativeDriver: true }),
@@ -57,9 +42,6 @@ export default function Home({ navigation }) {
     ]).start();
   };
 
-  // ==============================
-  //  CARGA EMAIL GUARDADO + ANIM
-  // ==============================
   useEffect(() => {
     const cargarUltimoEmail = async () => {
       try {
@@ -81,58 +63,45 @@ export default function Home({ navigation }) {
     }).start();
   }, []);
 
-  // ==============================
-  //  AUTH STATE
-  // ==============================
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, () => {});
     return unsubscribe;
   }, []);
 
-  // ==============================
-  //  VALIDACIÓN EMAIL
-  // ==============================
+  // ✅ VALIDACIÓN DE EMAIL MEJORADA - Acepta cualquier dominio válido
   const validarYSetearEmail = (raw) => {
     const t = raw.trim().toLowerCase();
     setEmail(t);
 
-    if (!t.includes("@") || t.split("@")[0].length === 0 || !t.split("@")[1]) {
+    // Expresión regular para validar formato de email
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    
+    // Verifica que tenga formato válido: algo@dominio.extension
+    const esValido = emailRegex.test(t);
+    
+    if (!esValido && t !== "") {
       setEmailValido(false);
-      setMotivoEmailInvalido("Formato inválido. Solo @gmail.com o @hotmail.com");
-      return;
+      setMotivoEmailInvalido("Formato de correo electrónico inválido.");
+    } else {
+      setEmailValido(true);
+      setMotivoEmailInvalido("");
     }
-
-    const dominio = t.split("@")[1];
-    const permitido = dominio === "gmail.com" || dominio === "hotmail.com";
-
-    if (!permitido) {
-      setEmailValido(false);
-      setMotivoEmailInvalido("Formato inválido.");
-      return;
-    }
-
-    setEmailValido(true);
-    setMotivoEmailInvalido("");
   };
 
   const onChangeEmail = (texto) => validarYSetearEmail(texto);
 
-  // ✅ Habilitar botón solo si todo OK
   useEffect(() => {
-    setBotonHabilitado(email.trim() && password.trim() && emailValido);
-  }, [email, password, emailValido]);
+    setBotonHabilitado(email.trim() && emailValido);
+  }, [email, emailValido]);
 
-  // ==============================
-  //  LOGIN
-  // ==============================
-  const handleLogin = async () => {
+  const handlePasswordReset = async () => {
     const correo = email.trim().toLowerCase();
 
-    if (!emailValido || !password.trim()) {
+    if (!emailValido || !correo.trim()) {
       shakeInput();
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       setAlertType("error");
-      setAlertMessage("Revisá los campos.");
+      setAlertMessage("Por favor, ingresa un correo electrónico válido.");
       setAlertVisible(true);
       return;
     }
@@ -140,28 +109,24 @@ export default function Home({ navigation }) {
     setLoading(true);
 
     try {
-      await signInWithEmailAndPassword(auth, correo, password);
-      await AsyncStorage.setItem("ultimoEmail", correo);
-      await AsyncStorage.setItem("alertMostrado", "true");
+      await sendPasswordResetEmail(auth, correo);
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setAlertType("success");
-      setAlertMessage("Inicio de sesión exitoso.");
+      setAlertMessage("¡Enlace enviado! Si el correo está registrado, revisa tu bandeja de entrada o spam para restablecer tu contraseña.");
       setAlertVisible(true);
     } catch (error) {
       shakeInput();
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       setAlertType("error");
-      setAlertMessage("Credenciales inválidas.");
+      setAlertMessage("Error al enviar el enlace. Verifica el email e inténtalo de nuevo.");
       setAlertVisible(true);
+      console.log("Error de restablecimiento:", error.message);
     } finally {
       setLoading(false);
     }
   };
 
-  // ==============================
-  //  ESTILOS INPUT
-  // ==============================
   const getEmailContainerStyle = () => {
     if (email !== "" && !emailValido) return [styles.inputContainer, styles.inputError];
     if (isEmailFocused) return [styles.inputContainer, styles.inputFocused];
@@ -172,8 +137,6 @@ export default function Home({ navigation }) {
     if (email !== "" && !emailValido) return "#FF4D4D";
     return isEmailFocused ? PRIMARY_COLOR : "gray";
   };
-
-  const getPassIconColor = () => (isPasswordFocused ? PRIMARY_COLOR : "gray");
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -187,18 +150,24 @@ export default function Home({ navigation }) {
               imageStyle={styles.headerImageStyle}
             >
               <View style={styles.overlayHeader} />
+              <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+                <Ionicons name="arrow-back" size={28} color={TEXT_COLOR_LIGHT} />
+              </TouchableOpacity>
               <Image source={require("../assets/logo.png")} style={styles.logoHeader} resizeMode="contain" />
             </ImageBackground>
 
             <Animated.View style={[styles.card, { transform: [{ translateY: animatedCardY }] }]}>
-              <Text style={styles.titulo}>Inicio de sesión</Text>
+              <Text style={styles.titulo}>Restablecer Contraseña</Text>
 
-              {/* EMAIL */}
+              <Text style={styles.subtitulo}>
+                Ingresa el correo electrónico asociado a tu cuenta. Te enviaremos un enlace seguro para que puedas establecer una nueva contraseña.
+              </Text>
+
               <Animated.View style={{ transform: [{ translateX: shakeAnim }] }}>
                 <View style={getEmailContainerStyle()}>
                   <Ionicons name="mail-outline" size={20} color={getEmailIconColor()} style={styles.icon} />
                   <TextInput
-                    placeholder="example@gmail.com"
+                    placeholder="Tu correo electrónico"
                     placeholderTextColor="#999"
                     style={styles.input}
                     value={email}
@@ -208,59 +177,29 @@ export default function Home({ navigation }) {
                     onFocus={() => setIsEmailFocused(true)}
                     onBlur={() => setIsEmailFocused(false)}
                   />
-
-                  {email.length > 0 && emailValido && (
-                    <Ionicons name="checkmark-circle" size={20} color="green" />
-                  )}
-                  {email.length > 0 && !emailValido && (
-                    <Ionicons name="close-circle" size={20} color="red" />
-                  )}
+                  {email.length > 0 && emailValido && <Ionicons name="checkmark-circle" size={20} color="green" />}
+                  {email.length > 0 && !emailValido && <Ionicons name="close-circle" size={20} color="red" />}
                 </View>
               </Animated.View>
 
               {email !== "" && !emailValido && <Text style={styles.errorText}>{motivoEmailInvalido}</Text>}
 
-              {/* PASSWORD */}
-              <View style={[styles.inputContainer, isPasswordFocused && styles.inputFocused]}>
-                <Ionicons name="lock-closed-outline" size={20} color={getPassIconColor()} style={styles.icon} />
-                <TextInput
-                  placeholder="Contraseña"
-                  placeholderTextColor="#999"
-                  secureTextEntry={secure}
-                  style={[styles.input, { marginRight: 8 }]}
-                  value={password}
-                  onChangeText={setPassword}
-                  onFocus={() => setIsPasswordFocused(true)}
-                  onBlur={() => setIsPasswordFocused(false)}
-                />
-                <TouchableOpacity onPress={() => setSecure(!secure)}>
-                  <Ionicons name={secure ? "eye-off" : "eye"} size={20} color={PRIMARY_COLOR} />
-                </TouchableOpacity>
-              </View>
-
-              <View style={styles.optionsRow}>
-                <TouchableOpacity onPress={() => navigation.navigate("ForgotPassword")}>
-                  <Text style={styles.olvidaste}>¿Olvidaste tu contraseña?</Text>
-                </TouchableOpacity>
-              </View>
-
-              {/* BOTÓN */}
               <TouchableOpacity
                 style={[styles.boton, (!botonHabilitado || loading) && styles.botonDisabled]}
-                onPress={handleLogin}
+                onPress={handlePasswordReset}
                 disabled={!botonHabilitado || loading}
                 activeOpacity={0.85}
               >
                 {loading ? (
                   <ActivityIndicator color={BACKGROUND_COLOR} size="small" />
                 ) : (
-                  <Text style={styles.textoBoton}>Iniciar sesión</Text>
+                  <Text style={styles.textoBoton}>Enviar enlace de restablecimiento</Text>
                 )}
               </TouchableOpacity>
 
-              <TouchableOpacity onPress={() => navigation.navigate("SignUp")} activeOpacity={0.8}>
+              <TouchableOpacity onPress={() => navigation.navigate("Login")} activeOpacity={0.8}>
                 <Text style={styles.registro}>
-                  ¿No tenés una cuenta? <Text style={styles.link}>Regístrate</Text>
+                  ¿Recordaste tu contraseña? <Text style={styles.link}>Volver al inicio de sesión</Text>
                 </Text>
               </TouchableOpacity>
             </Animated.View>
@@ -272,7 +211,10 @@ export default function Home({ navigation }) {
         isVisible={alertVisible}
         type={alertType}
         message={alertMessage}
-        onConfirm={() => setAlertVisible(false)}
+        onConfirm={() => {
+          setAlertVisible(false);
+          if (alertType === "success") navigation.navigate("Login");
+        }}
       />
     </SafeAreaView>
   );
@@ -280,25 +222,25 @@ export default function Home({ navigation }) {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: BACKGROUND_COLOR },
-  scrollContainer: { flexGrow: 1, justifyContent: "space-between" },
-  headerImgBackground: {
-    width: "100%",
-    height: 350,
-    justifyContent: "center",
-    alignItems: "center",
-  },
+  scrollContainer: { flexGrow: 1, justifyContent: "flex-start", paddingBottom: 40 },
+  headerImgBackground: { width: "100%", height: 350, justifyContent: "center", alignItems: "center" },
   headerImageStyle: { transform: [{ scale: 1 }] },
   logoHeader: { width: "60%", height: "60%", zIndex: 3 },
-  overlayHeader: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.65)",
-    zIndex: 1,
+  overlayHeader: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.65)", zIndex: 1 },
+  backButton: {
+    position: "absolute",
+    top: Platform.OS === "ios" ? 40 : 20,
+    left: 20,
+    zIndex: 4,
+    padding: 10,
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
+    borderRadius: 50,
   },
-
   card: {
     flex: 1,
     backgroundColor: TEXT_COLOR_LIGHT,
-    borderRadius: 24,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     padding: 20,
     marginTop: -50,
     zIndex: 2,
@@ -308,14 +250,8 @@ const styles = StyleSheet.create({
     shadowRadius: 15,
     elevation: 20,
   },
-
-  titulo: {
-    fontSize: 40,
-    fontWeight: "700",
-    marginBottom: 20,
-    color: BACKGROUND_COLOR,
-  },
-
+  titulo: { fontSize: 32, fontWeight: "700", marginBottom: 5, color: BACKGROUND_COLOR },
+  subtitulo: { fontSize: 16, color: "#666", marginBottom: 30, lineHeight: 22 },
   inputContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -328,41 +264,11 @@ const styles = StyleSheet.create({
     height: 54,
     backgroundColor: TEXT_COLOR_LIGHT,
   },
-
-  inputFocused: {
-    borderColor: PRIMARY_COLOR,
-    borderWidth: 2,
-  },
-
+  inputFocused: { borderColor: PRIMARY_COLOR, borderWidth: 2 },
   icon: { marginRight: 8 },
-
-  input: {
-    flex: 1,
-    height: "100%",
-    color: BACKGROUND_COLOR,
-    fontSize: 16,
-  },
-
-  inputError: {
-    borderColor: "#FF4D4D",
-    borderWidth: 2,
-  },
-
-  errorText: {
-    color: "red",
-    fontSize: 12,
-    marginBottom: 10,
-    fontWeight: "500",
-  },
-
-  optionsRow: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    alignItems: "center",
-    marginBottom: 15,
-  },
-  olvidaste: { color: PRIMARY_COLOR, fontSize: 14, fontWeight: "600" },
-
+  input: { flex: 1, height: "100%", color: BACKGROUND_COLOR, fontSize: 16, paddingVertical: 0 },
+  inputError: { borderColor: "#FF4D4D", borderWidth: 2 },
+  errorText: { color: "red", fontSize: 12, marginBottom: 10, fontWeight: "500", marginLeft: 5 },
   boton: {
     backgroundColor: PRIMARY_COLOR,
     paddingVertical: 14,
@@ -377,15 +283,8 @@ const styles = StyleSheet.create({
     shadowRadius: 5,
     elevation: 8,
   },
-  botonDisabled: {
-    opacity: 0.5,
-  },
+  botonDisabled: { opacity: 0.5 },
   textoBoton: { color: BACKGROUND_COLOR, fontWeight: "700", fontSize: 16 },
-  registro: {
-    textAlign: "center",
-    color: BACKGROUND_COLOR,
-    marginTop: 6,
-    fontSize: 14,
-  },
+  registro: { textAlign: "center", color: BACKGROUND_COLOR, marginTop: 6, fontSize: 14 },
   link: { color: PRIMARY_COLOR, fontWeight: "700" },
 });

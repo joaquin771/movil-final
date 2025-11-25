@@ -88,29 +88,18 @@ export default function SignUp({ navigation }) {
     setErrores((prev) => ({ ...prev, apellido: false }));
   };
 
-  // 👇 SOLO gmail.com o hotmail.com
+  // ✅ VALIDACIÓN DE EMAIL MEJORADA - Acepta cualquier dominio válido
   const validarEmail = (texto) => {
     const t = texto.trim().toLowerCase();
     setEmail(t);
 
-    // chequeo básico estructura algo@algo
-    const tieneArrobaYTexto =
-      t.includes("@") &&
-      t.split("@")[0].length > 0 &&
-      t.split("@")[1] &&
-      t.split("@")[1].length > 0;
-
-    if (!tieneArrobaYTexto) {
-      setEmailValido(false);
-      setErrores((prev) => ({ ...prev, email: false }));
-      return;
-    }
-
-    const dominio = t.split("@")[1]; // después del @
-    const permitido =
-      dominio === "gmail.com" || dominio === "hotmail.com";
-
-    setEmailValido(permitido);
+    // Expresión regular para validar formato de email
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    
+    // Verifica que tenga formato válido: algo@dominio.extension
+    const esValido = emailRegex.test(t);
+    
+    setEmailValido(esValido);
     setErrores((prev) => ({ ...prev, email: false }));
   };
 
@@ -151,19 +140,14 @@ export default function SignUp({ navigation }) {
       return;
     }
 
-    // dominio permitido? (chequeo crítico ANTES de crear cuenta)
-    const lowerEmail = email.trim().toLowerCase();
-    const partes = lowerEmail.split("@");
-    const dominioVal = partes[1] || "";
-    const dominioPermitido =
-      dominioVal === "gmail.com" || dominioVal === "hotmail.com";
-
-    if (!dominioPermitido) {
+    // ✅ Validar formato de email (acepta cualquier dominio válido)
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email.trim().toLowerCase())) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       setErrores((prev) => ({ ...prev, email: true }));
-      setEmailValido(false); // fuerza el rojo visual
+      setEmailValido(false);
       setAlertType("error");
-      setAlertMessage("Formato de correo inválido.");
+      setAlertMessage("Formato de correo electrónico inválido.");
       setAlertVisible(true);
       return;
     }
@@ -629,7 +613,7 @@ const styles = StyleSheet.create({
   },
   link: { color: PRIMARY_COLOR, fontWeight: "700" },
 
-  // Nuevos estilos para requisitos de contraseña
+  // Estilos para requisitos de contraseña
   requisitosContainer: {
     marginBottom: 8,
     paddingHorizontal: 4,

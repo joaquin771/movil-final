@@ -43,29 +43,184 @@ const LOGO_SOURCE = require("../assets/logo.png");
 
 // Opciones de género
 const GENDER_OPTIONS = ["Hombre", "Mujer", "Otros", "Prefiero no decirlo"];
+// ============================================================
+// DATOS DE PROVINCIAS Y DEPARTAMENTOS (Argentina - Solo Salta)
+// ============================================================
+const PROVINCES_DATA = {
+  "Salta": {
+    name: "Salta",
+    departments: {
+      "Anta": ["Zona Centro", "Zona Norte", "Zona Sur"],
+      "Cachi": ["Zona Centro", "Zona Este", "Zona Oeste"],
+      "Cafayate": ["Zona Centro", "Zona Norte", "Zona Sur"],
+      "Cerrillos": ["Zona Centro", "Zona Este", "Zona Oeste"],
+      "Chicoana": ["Zona Centro", "Zona Norte", "Zona Sur"],
+      "General Güemes": ["Zona Centro", "Zona Este", "Zona Oeste"],
+      "General José de San Martín": ["Zona Centro", "Zona Norte", "Zona Sur"],
+      "Guachipas": ["Zona Centro", "Zona Este"],
+      "Iruya": ["Zona Centro", "Zona Norte"],
+      "La Caldera": ["Zona Centro", "Zona Este", "Zona Oeste"],
+      "La Candelaria": ["Zona Centro", "Zona Norte"],
+      "La Poma": ["Zona Centro", "Zona Sur"],
+      "La Viña": ["Zona Centro", "Zona Este", "Zona Oeste"],
+      "Los Andes": ["Zona Centro", "Zona Norte", "Zona Sur"],
+      "Metán": ["Zona Centro", "Zona Este", "Zona Oeste"],
+      "Molinos": ["Zona Centro", "Zona Norte"],
+      "Orán": ["Zona Centro", "Zona Norte", "Zona Sur"],
+      "Rivadavia": ["Zona Centro", "Zona Este"],
+      "Rosario de la Frontera": ["Zona Centro", "Zona Norte", "Zona Sur"],
+      "Rosario de Lerma": ["Zona Centro", "Zona Este", "Zona Oeste"],
+      "Salta Capital": ["Centro", "Norte", "Sur", "Este", "Oeste", "Villa San Lorenzo", "Tres Cerritos"],
+      "San Carlos": ["Zona Centro", "Zona Norte"],
+      "Santa Victoria": ["Zona Centro", "Zona Este"],
+    },
+  },
+};
 
-// Validación de DNI
+// ============================================================
+// ÁREAS LOCALES DE TELEFONÍA (Solo Salta)
+// ============================================================
+const PHONE_AREAS = [
+  { code: "+54 387", name: "Salta Capital", region: "Salta" },
+  { code: "+54 3868", name: "Metán", region: "Salta" },
+  { code: "+54 3872", name: "Rosario de la Frontera", region: "Salta" },
+  { code: "+54 3873", name: "General Güemes", region: "Salta" },
+  { code: "+54 3876", name: "Cafayate", region: "Salta" },
+  { code: "+54 3877", name: "Orán", region: "Salta" },
+  { code: "+54 3878", name: "Tartagal", region: "Salta" },
+];
+// ✨ VALIDACIÓN DE DNI CON VERIFICACIÓN BÁSICA
 const validateDNI = (dni) => {
   const cleanDNI = String(dni).replace(/[^0-9]/g, "");
-  if (!cleanDNI) return true; // campo vacío lo manejás aparte si es requerido
+  if (!cleanDNI) return { valid: true, error: "" };
 
-  // Debe tener 7 u 8 dígitos
-  if (!/^\d{7,8}$/.test(cleanDNI)) return false;
+  if (!/^\d{7,8}$/.test(cleanDNI)) {
+    return { valid: false, error: "El DNI debe contener 7 u 8 dígitos" };
+  }
 
   const num = parseInt(cleanDNI, 10);
-  if (num < 1 || num > 99999999) return false;
+  if (num < 1 || num > 99999999) {
+    return { valid: false, error: "DNI inválido" };
+  }
 
-  return true;
+  return { valid: true, error: "" };
 };
 
-// Validación de teléfono
-const validatePhone = (value) => {
-  if (!value) return true; // vacío permitido si no es obligatorio
-  const digits = value.replace(/[^\d]/g, "");
-  return digits.length >= 6 && digits.length <= 15;
+// ✨ VALIDACIÓN DE EDAD (máximo 65 años)
+const validateAge = (dob) => {
+  if (!dob) return { valid: true, error: "" };
+
+  const today = new Date();
+  const birthDate = new Date(dob);
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const monthDiff = today.getMonth() - birthDate.getMonth();
+
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+    age--;
+  }
+
+  if (age > 65) {
+    return { valid: false, error: "Debes tener máximo 65 años" };
+  }
+
+  return { valid: true, error: "" };
 };
 
-// Header personalizado
+// ✨ VALIDACIÓN DE TELÉFONO (con área seleccionada)
+const validatePhone = (areaCode, phoneNumber) => {
+  if (!phoneNumber || phoneNumber.trim() === "") {
+    return { valid: true, error: "" };
+  }
+
+  const digitsOnly = phoneNumber.replace(/[^\d]/g, "");
+
+  // Validar que tenga entre 6-8 dígitos (varían según la zona)
+  if (digitsOnly.length < 6 || digitsOnly.length > 8) {
+    return {
+      valid: false,
+      error: "Número de teléfono debe tener entre 6-8 dígitos",
+    };
+  }
+
+  return { valid: true, error: "" };
+};
+
+// ✨ VALIDACIÓN DE DIRECCIÓN MEJORADA (calle y número)
+const validateStreetAddress = (street, number) => {
+  if (!street || street.trim() === "") {
+    return { valid: true, error: "" };
+  }
+
+  // Longitud: máximo 30 caracteres, mínimo 3 si se proporcionó
+  if (street.trim().length < 3) {
+    return {
+      valid: false,
+      error: "El nombre de la calle debe tener al menos 3 caracteres",
+    };
+  }
+
+  if (street.trim().length > 30) {
+    return {
+      valid: false,
+      error: "El nombre de la calle no puede exceder 30 caracteres",
+    };
+  }
+
+  // Solo letras y espacios, guión y apóstrofe (sin números, sin emojis ni símbolos)
+  try {
+    if (!/^[\p{L}\s'-]+$/u.test(street.trim())) {
+      return {
+        valid: false,
+        error: "La calle sólo puede contener letras y espacios",
+      };
+    }
+  } catch (e) {
+    // Fallback para motores sin soporte \p{L}
+    if (!/^[A-Za-zÁÉÍÓÚáéíóúÑñ\s'-]+$/.test(street.trim())) {
+      return {
+        valid: false,
+        error: "La calle sólo puede contener letras y espacios",
+      };
+    }
+  }
+
+  // ✨ NUEVA VALIDACIÓN PARA EL NÚMERO
+  if (number && number.trim() !== "") {
+    // Permitir números, letras (para "S/N"), y algunos caracteres especiales comunes
+    const numberPattern = /^[0-9A-Za-z\s\-\/]+$/;
+    
+    if (!numberPattern.test(number)) {
+      return {
+        valid: false,
+        error: "El número contiene caracteres no válidos",
+      };
+    }
+
+    if (number.trim().length > 10) {
+      return {
+        valid: false,
+        error: "El número no puede exceder 10 caracteres",
+      };
+    }
+
+    // Verificar si es "S/N" o similar (sin número)
+    const sinNumero = /^(s\/n|sn|sin\s*número)$/i;
+    if (!sinNumero.test(number.trim())) {
+      // Si no es "S/N", debe contener al menos un dígito
+      if (!/\d/.test(number)) {
+        return {
+          valid: false,
+          error: "El número debe contener al menos un dígito o ser 'S/N'",
+        };
+      }
+    }
+  }
+
+  return { valid: true, error: "" };
+};
+// ============================================================
+// HEADER PERSONALIZADO
+// ============================================================
 const CustomHeader = ({ onBackPress, theme }) => {
   return (
     <ImageBackground
@@ -94,7 +249,124 @@ const CustomHeader = ({ onBackPress, theme }) => {
     </ImageBackground>
   );
 };
+// ============================================================
+// MODAL DE SELECCIÓN GENÉRICA (Departamentos, Calles, Áreas)
+// ============================================================
+const SelectionModal = ({
+  isVisible,
+  onClose,
+  title,
+  options,
+  selectedValue,
+  onSelectValue,
+  theme,
+}) => {
+  const [searchText, setSearchText] = useState("");
 
+  const filteredOptions = options.filter((opt) =>
+    opt.toLowerCase().includes(searchText.toLowerCase())
+  );
+
+  return (
+    <Modal
+      visible={isVisible}
+      transparent
+      animationType="slide"
+      onRequestClose={onClose}
+    >
+      <View
+        style={[
+          styles.modalOverlay,
+          { backgroundColor: theme.modalOverlay },
+        ]}
+      >
+        <View style={[styles.modalContent, { backgroundColor: theme.card }]}>
+          <View
+            style={[
+              styles.pickerHeader,
+              { borderBottomColor: theme.border },
+            ]}
+          >
+            <Text style={[styles.pickerTitle, { color: theme.text }]}>
+              {title}
+            </Text>
+          </View>
+
+          {/* Buscador */}
+          <TextInput
+            style={[
+              styles.searchInput,
+              {
+                backgroundColor: theme.background,
+                color: theme.text,
+                borderColor: theme.border,
+              },
+            ]}
+            placeholder="Buscar..."
+            placeholderTextColor={theme.textSecondary}
+            value={searchText}
+            onChangeText={setSearchText}
+          />
+
+          <ScrollView style={{ maxHeight: 300 }}>
+            {filteredOptions.map((option) => {
+              const selected = option === selectedValue;
+              return (
+                <TouchableOpacity
+                  key={option}
+                  style={[
+                    styles.genderItem,
+                    {
+                      backgroundColor: theme.card,
+                      borderBottomColor: theme.border,
+                    },
+                    selected && {
+                      backgroundColor: theme.primary + "20",
+                    },
+                  ]}
+                  onPress={() => {
+                    onSelectValue(option);
+                    onClose();
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.genderItemText,
+                      { color: theme.text },
+                      selected && { fontWeight: "700" },
+                    ]}
+                  >
+                    {option}
+                  </Text>
+                  {selected && (
+                    <Ionicons
+                      name="checkmark"
+                      size={18}
+                      color={theme.primary}
+                    />
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+
+          <TouchableOpacity
+            style={[
+              styles.closeButton,
+              { margin: 15, backgroundColor: theme.primary },
+            ]}
+            onPress={onClose}
+          >
+            <Text style={styles.closeButtonText}>Cerrar</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+};
+// ============================================================
+// MODAL DE GÉNERO
+// ============================================================
 const GenderModal = ({
   isVisible,
   onClose,
@@ -103,7 +375,12 @@ const GenderModal = ({
   theme,
 }) => {
   return (
-    <Modal visible={isVisible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal
+      visible={isVisible}
+      transparent
+      animationType="slide"
+      onRequestClose={onClose}
+    >
       <View
         style={[
           styles.modalOverlay,
@@ -153,7 +430,11 @@ const GenderModal = ({
                     {option}
                   </Text>
                   {selected && (
-                    <Ionicons name="checkmark" size={18} color={theme.primary} />
+                    <Ionicons
+                      name="checkmark"
+                      size={18}
+                      color={theme.primary}
+                    />
                   )}
                 </TouchableOpacity>
               );
@@ -174,8 +455,9 @@ const GenderModal = ({
     </Modal>
   );
 };
-
-// Modal de selección de tema
+// ============================================================
+// MODAL DE TEMA
+// ============================================================
 const ThemeModal = ({
   isVisible,
   onClose,
@@ -189,7 +471,12 @@ const ThemeModal = ({
   ];
 
   return (
-    <Modal visible={isVisible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal
+      visible={isVisible}
+      transparent
+      animationType="slide"
+      onRequestClose={onClose}
+    >
       <View
         style={[
           styles.modalOverlay,
@@ -283,14 +570,16 @@ const ThemeModal = ({
     </Modal>
   );
 };
-
+// ============================================================
+// COMPONENTE PRINCIPAL: PROFILE
+// ============================================================
 export default function Profile({ navigation }) {
-  // ✨ ahora usamos el contexto global de tema
-  // esto hace que cuando cambies el tema acá, cambie TODA la app
   const { theme, isDarkMode, toggleTheme } = useTheme();
-
   const currentUser = auth.currentUser;
 
+  // ============================================================
+  // ESTADOS - MODALES
+  // ============================================================
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
@@ -298,6 +587,7 @@ export default function Profile({ navigation }) {
   const [isDatePickerVisible, setIsDatePickerVisible] = useState(false);
   const [tempDob, setTempDob] = useState(null);
   const [isThemeModalVisible, setIsThemeModalVisible] = useState(false);
+  const [isImageOptionsVisible, setIsImageOptionsVisible] = useState(false);
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState({
     type: "warning",
@@ -307,53 +597,74 @@ export default function Profile({ navigation }) {
     customTitle: "",
   });
 
-  // Estados del perfil
+  // ============================================================
+  // ESTADOS - MODALES DE DIRECCIÓN
+  // ============================================================
+  const [isDepartmentModalVisible, setIsDepartmentModalVisible] = useState(false);
+  const [isStreetModalVisible, setIsStreetModalVisible] = useState(false);
+
+  // ============================================================
+  // ESTADOS - MODALES DE TELÉFONO
+  // ============================================================
+  const [isPhoneAreaModalVisible, setIsPhoneAreaModalVisible] = useState(false);
+
+  // ============================================================
+  // ESTADOS DEL PERFIL - DIRECCIÓN
+  // ============================================================
+  const [province, setProvince] = useState("Salta");
+  const [department, setDepartment] = useState("");
+  const [street, setStreet] = useState("");
+  const [streetNumber, setStreetNumber] = useState("");
+  const [streetError, setStreetError] = useState("");
+
+  // ============================================================
+  // ESTADOS DEL PERFIL - TELÉFONO
+  // ============================================================
+  const [phoneArea, setPhoneArea] = useState("");
+  const [phoneNumber, setPhoneNumber] = useState("");
+  const [phoneError, setPhoneError] = useState("");
+
+  // ============================================================
+  // ESTADOS DEL PERFIL - GENERAL
+  // ============================================================
   const [displayName, setDisplayName] = useState(currentUser?.displayName || "");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
-  const [profileImageUri, setProfileImageUri] = useState(currentUser?.photoURL);
+  const [profileImageUri, setProfileImageUri] = useState(
+    currentUser?.photoURL
+  );
   const [dni, setDni] = useState("");
-  const [address, setAddress] = useState("");
-  const [phone, setPhone] = useState("");
-  const [phoneError, setPhoneError] = useState("");
   const [gender, setGender] = useState("");
   const [dob, setDob] = useState(null);
   const [validationError, setValidationError] = useState("");
 
-  // Animaciones
+  // ============================================================
+  // ANIMACIONES
+  // ============================================================
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(50)).current;
 
-  // abrir modal de tema
-  const handleThemeChange = () => {
-    setIsThemeModalVisible(true);
-  };
-
-  // seleccionado desde ThemeModal: 'light' | 'dark'
-  const handleThemeSelection = async (value) => {
-    const wantDark = value === "dark";
-    try {
-      toggleTheme(wantDark); // 👈 esto actualiza ThemeContext global y persiste en AsyncStorage
-    } catch (e) {
-      console.error("Error al cambiar tema:", e);
-    } finally {
-      setIsThemeModalVisible(false);
-    }
-  };
-
+  // ============================================================
+  // EFECTO AL MONTAR COMPONENTE
+  // ============================================================
   useEffect(() => {
     loadUserData();
     startAnimations();
     requestPermissions();
 
-    // inicializar nombre y apellido a partir de displayName (si existe)
     if (displayName) {
       const parts = displayName.trim().split(/\s+/);
       setFirstName(parts.shift() || "");
       setLastName(parts.join(" ") || "");
     }
+
+    // ✨ NUEVO: Establecer Salta como provincia por defecto
+    setProvince("Salta");
   }, []);
 
+  // ============================================================
+  // FUNCIONES DE ANIMACIÓN
+  // ============================================================
   const startAnimations = () => {
     Animated.parallel([
       Animated.timing(fadeAnim, {
@@ -368,20 +679,35 @@ export default function Profile({ navigation }) {
       }),
     ]).start();
   };
-
+  // ============================================================
+  // CARGAR DATOS DEL USUARIO
+  // ============================================================
   const loadUserData = async () => {
     if (!currentUser) return;
     try {
       const uid = currentUser.uid;
       const storedDni = await AsyncStorage.getItem(`dni_${uid}`);
-      const storedAddress = await AsyncStorage.getItem(`address_${uid}`);
-      const storedPhone = await AsyncStorage.getItem(`phone_${uid}`);
+      const storedProvince = await AsyncStorage.getItem(`province_${uid}`);
+      const storedDepartment = await AsyncStorage.getItem(`department_${uid}`);
+      const storedStreet = await AsyncStorage.getItem(`street_${uid}`);
+      const storedStreetNumber = await AsyncStorage.getItem(
+        `streetNumber_${uid}`
+      );
+      const storedPhoneArea = await AsyncStorage.getItem(`phoneArea_${uid}`);
+      const storedPhoneNumber = await AsyncStorage.getItem(
+        `phoneNumber_${uid}`
+      );
       const storedGender = await AsyncStorage.getItem(`gender_${uid}`);
       const storedDobString = await AsyncStorage.getItem(`dob_${uid}`);
 
       if (storedDni) setDni(storedDni);
-      if (storedAddress) setAddress(storedAddress);
-      if (storedPhone) setPhone(storedPhone);
+      if (storedProvince) setProvince(storedProvince);
+      else setProvince("Salta"); // ✨ Por defecto Salta
+      if (storedDepartment) setDepartment(storedDepartment);
+      if (storedStreet) setStreet(storedStreet);
+      if (storedStreetNumber) setStreetNumber(storedStreetNumber);
+      if (storedPhoneArea) setPhoneArea(storedPhoneArea);
+      if (storedPhoneNumber) setPhoneNumber(storedPhoneNumber);
       if (storedGender) setGender(storedGender);
 
       if (storedDobString) {
@@ -400,20 +726,73 @@ export default function Profile({ navigation }) {
     }
   };
 
+  // ============================================================
+  // SOLICITAR PERMISOS
+  // ============================================================
   const requestPermissions = async () => {
     if (Platform.OS !== "web") {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== "granted") {
         // silencioso
       }
-      // solicitar permiso de cámara también (para tomar foto)
       const camera = await ImagePicker.requestCameraPermissionsAsync();
       if (camera.status !== "granted") {
         // silencioso
       }
     }
   };
+  // ============================================================
+  // CAMBIO DE TEMA
+  // ============================================================
+  const handleThemeChange = () => {
+    setIsThemeModalVisible(true);
+  };
 
+  const handleThemeSelection = async (value) => {
+    const wantDark = value === "dark";
+    try {
+      toggleTheme(wantDark);
+    } catch (e) {
+      console.error("Error al cambiar tema:", e);
+    } finally {
+      setIsThemeModalVisible(false);
+    }
+  };
+
+  // ============================================================
+  // FUNCIONES AUXILIARES PARA DIRECCIÓN
+  // ============================================================
+  const getDepartmentsList = (selectedProvince) => {
+    if (!selectedProvince || !PROVINCES_DATA[selectedProvince]) return [];
+    return Object.keys(PROVINCES_DATA[selectedProvince].departments);
+  };
+
+  const getStreetsList = (selectedProvince, selectedDepartment) => {
+    if (
+      !selectedProvince ||
+      !selectedDepartment ||
+      !PROVINCES_DATA[selectedProvince]
+    )
+      return [];
+    return (
+      PROVINCES_DATA[selectedProvince].departments[selectedDepartment] || []
+    );
+  };
+
+  // ============================================================
+  // FUNCIONES AUXILIARES PARA TELÉFONO
+  // ============================================================
+  const getPhoneAreasList = () =>
+    PHONE_AREAS.map((area) => `${area.code} - ${area.name}`);
+
+  const getSelectedAreaCode = () => {
+    if (!phoneArea) return "";
+    const areaName = phoneArea.split(" - ")[0];
+    return areaName;
+  };
+  // ============================================================
+  // FUNCIONES DE SELECCIÓN DE IMÁGENES
+  // ============================================================
   const pickFromLibrary = async () => {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
@@ -424,9 +803,23 @@ export default function Profile({ navigation }) {
       });
       if (!result.canceled) {
         setProfileImageUri(result.assets[0].uri);
+        setAlertConfig({
+          type: "success",
+          customTitle: "Imagen seleccionada",
+          message: "La imagen fue seleccionada correctamente.",
+          onConfirm: () => setAlertVisible(false),
+        });
+        setAlertVisible(true);
       }
     } catch (e) {
       console.error("pickFromLibrary:", e);
+      setAlertConfig({
+        type: "error",
+        customTitle: "Error",
+        message: "No se pudo seleccionar la imagen. Intenta nuevamente.",
+        onConfirm: () => setAlertVisible(false),
+      });
+      setAlertVisible(true);
     }
   };
 
@@ -434,7 +827,13 @@ export default function Profile({ navigation }) {
     try {
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
       if (status !== "granted") {
-        Alert.alert("Permiso denegado", "No se otorgó permiso para usar la cámara.");
+        setAlertConfig({
+          type: "warning",
+          customTitle: "Permiso denegado",
+          message: "No se otorgó permiso para usar la cámara.",
+          onConfirm: () => setAlertVisible(false),
+        });
+        setAlertVisible(true);
         return;
       }
       const result = await ImagePicker.launchCameraAsync({
@@ -445,41 +844,35 @@ export default function Profile({ navigation }) {
       });
       if (!result.canceled) {
         setProfileImageUri(result.assets[0].uri);
+        setAlertConfig({
+          type: "success",
+          customTitle: "Imagen tomada",
+          message: "La foto se tomó correctamente.",
+          onConfirm: () => setAlertVisible(false),
+        });
+        setAlertVisible(true);
       }
     } catch (e) {
       console.error("takePhoto:", e);
+      setAlertConfig({
+        type: "error",
+        customTitle: "Error",
+        message: "No se pudo tomar la foto. Intenta nuevamente.",
+        onConfirm: () => setAlertVisible(false),
+      });
+      setAlertVisible(true);
     }
   };
 
   const pickImage = async () => {
-    // mostrar opciones nativas en iOS o Alert en Android
-    if (Platform.OS === "ios" && ActionSheetIOS) {
-      ActionSheetIOS.showActionSheetWithOptions(
-        {
-          options: ["Cancelar", "Tomar foto", "Elegir de la galería"],
-          cancelButtonIndex: 0,
-        },
-        (buttonIndex) => {
-          if (buttonIndex === 1) takePhoto();
-          if (buttonIndex === 2) pickFromLibrary();
-        }
-      );
-      return;
-    }
-
-    // Android / otros: Alert con botones
-    Alert.alert(
-      "Seleccionar imagen",
-      "Elige una opción",
-      [
-        { text: "Cancelar", style: "cancel" },
-        { text: "Tomar foto", onPress: takePhoto },
-        { text: "Elegir de la galería", onPress: pickFromLibrary },
-      ],
-      { cancelable: true }
-    );
+    console.log('[Profile] pickImage called, isEditing=', isEditing, 'platform=', Platform.OS);
+    // Forzar abrir el modal personalizado en todas las plataformas para consistencia
+    setIsImageOptionsVisible(true);
   };
 
+  // ============================================================
+  // SUBIR IMAGEN A CLOUDINARY
+  // ============================================================
   const uploadImageToCloudinary = async (imageUri) => {
     if (!imageUri || imageUri.startsWith("http")) return imageUri;
 
@@ -495,11 +888,10 @@ export default function Profile({ navigation }) {
       const response = await fetch(CLOUDINARY_URL, {
         method: "POST",
         body: formData,
-        headers:
-          {
-            Accept: "application/json",
-            "Content-Type": "multipart/form-data",
-          },
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "multipart/form-data",
+        },
       });
 
       if (!response.ok) throw new Error("Error al subir imagen");
@@ -510,9 +902,10 @@ export default function Profile({ navigation }) {
       return null;
     }
   };
-
+  // ============================================================
+  // MANEJO DE CAMBIO DE FECHA
+  // ============================================================
   const handleDateChange = (event, selectedDate) => {
-    // Android: se cierra automáticamente y event.type indica 'set' o 'dismissed'
     if (Platform.OS === "android") {
       setIsDatePickerVisible(false);
       if (event?.type === "set" && selectedDate) {
@@ -521,13 +914,18 @@ export default function Profile({ navigation }) {
           setValidationError("La fecha de nacimiento no puede ser futura");
           setDob(null);
         } else {
-          setDob(selectedDate);
-          setValidationError("");
+          const ageValidation = validateAge(selectedDate);
+          if (!ageValidation.valid) {
+            setValidationError(ageValidation.error);
+            setDob(null);
+          } else {
+            setDob(selectedDate);
+            setValidationError("");
+          }
         }
       }
       return;
     }
-    // iOS: actualizar tempDob mientras el spinner cambia; confirmar con Aceptar
     if (selectedDate) setTempDob(selectedDate);
   };
 
@@ -536,41 +934,101 @@ export default function Profile({ navigation }) {
     setIsDatePickerVisible(true);
   };
 
+  // ============================================================
+  // FUNCIÓN SOLO LETRAS
+  // ============================================================
+  const onlyLetters = (text) => {
+    try {
+      return text
+        .replace(/[^'\-\p{L}\s]/gu, "")
+        .replace(/\s{2,}/g, " ")
+        .trimStart();
+    } catch (e) {
+      return text
+        .normalize("NFKD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^A-Za-zÁÉÍÓÚáéíóúÑñ\s'-]/g, "")
+        .replace(/\s{2,}/g, " ")
+        .trimStart();
+    }
+  };
+
+  // ============================================================
+  // OBTENER INICIALES
+  // ============================================================
+  const getInitials = () => {
+    const name = firstName || displayName || currentUser?.email || "";
+    return name.charAt(0).toUpperCase();
+  };
+  // ============================================================
+  // GUARDAR CAMBIOS ✨ CON TODAS LAS VALIDACIONES
+  // ============================================================
   const handleSave = async () => {
     Keyboard.dismiss();
 
-    if (!validateDNI(dni)) {
-      setValidationError("El DNI debe contener 7 u 8 dígitos");
+    // ✨ VALIDAR DNI
+    const dniValidation = validateDNI(dni);
+    if (!dniValidation.valid) {
+      setValidationError(dniValidation.error);
       return;
     }
 
-    if (!validatePhone(phone)) {
-      setPhoneError("Teléfono inválido — debe tener entre 6 y 15 dígitos");
+    // ✨ VALIDAR DIRECCIÓN
+    const streetValidation = validateStreetAddress(street, streetNumber);
+    if (!streetValidation.valid) {
+      setStreetError(streetValidation.error);
       return;
     }
 
+    // ✨ VALIDAR TELÉFONO
+    const phoneValidation = validatePhone(phoneArea, phoneNumber);
+    if (!phoneValidation.valid) {
+      setPhoneError(phoneValidation.error);
+      return;
+    }
+
+    // ✨ VALIDAR EDAD
+    const ageValidation = validateAge(dob);
+    if (!ageValidation.valid) {
+      setValidationError(ageValidation.error);
+      return;
+    }
+
+    // Limpiar errores
     setValidationError("");
+    setPhoneError("");
+    setStreetError("");
     setIsSaving(true);
 
     try {
       const uid = currentUser.uid;
-      const dobString = dob ? format(dob, "dd/MM/yyyy", { locale: es }) : "";
+      const dobString = dob
+        ? format(dob, "dd/MM/yyyy", { locale: es })
+        : "";
 
+      // Guardar en AsyncStorage
       await AsyncStorage.setItem(`dni_${uid}`, dni.trim());
-      await AsyncStorage.setItem(`address_${uid}`, address.trim());
-      await AsyncStorage.setItem(`phone_${uid}`, phone.trim());
+      await AsyncStorage.setItem(`province_${uid}`, province);
+      await AsyncStorage.setItem(`department_${uid}`, department);
+      await AsyncStorage.setItem(`street_${uid}`, street.trim());
+      await AsyncStorage.setItem(`streetNumber_${uid}`, streetNumber.trim());
+      await AsyncStorage.setItem(`phoneArea_${uid}`, phoneArea);
+      await AsyncStorage.setItem(`phoneNumber_${uid}`, phoneNumber.trim());
       await AsyncStorage.setItem(`gender_${uid}`, gender.trim());
       await AsyncStorage.setItem(`dob_${uid}`, dobString);
 
+      // Subir imagen si es necesario
       let newPhotoURL = profileImageUri;
       if (profileImageUri && !profileImageUri.startsWith("http")) {
         newPhotoURL = await uploadImageToCloudinary(profileImageUri);
       }
 
+      // Combinar nombre y apellido
       const combinedName = `${firstName.trim()}${
         lastName.trim() ? " " + lastName.trim() : ""
       }`.trim();
 
+      // Actualizar perfil en Firebase
       await updateProfile(currentUser, {
         displayName: combinedName || displayName.trim(),
         photoURL: newPhotoURL || currentUser.photoURL,
@@ -580,6 +1038,7 @@ export default function Profile({ navigation }) {
       setDisplayName(combinedName || displayName);
       setIsEditing(false);
 
+      // Mostrar alerta de éxito
       setAlertConfig({
         type: "success",
         customTitle: "¡Listo!",
@@ -597,43 +1056,16 @@ export default function Profile({ navigation }) {
       });
       setAlertVisible(true);
     } finally {
-        setIsSaving(false);
+      setIsSaving(false);
     }
   };
 
-  const confirmarCerrarSesion = useCallback(() => {
-    setAlertConfig({
-      type: "warning",
-      message: "¿Estás seguro de que deseas cerrar sesión?",
-      customTitle: "Confirmar Cierre de Sesión",
-      onConfirm: async () => {
-        setAlertVisible(false);
-        try {
-          await signOut(auth);
-          // no navigation.reset/replace aquí, igual que en Products
-        } catch (e) {
-          console.error("signOut:", e);
-          setAlertConfig({
-            type: "error",
-            customTitle: "Error",
-            message: "No se pudo cerrar sesión. Intenta nuevamente.",
-            onConfirm: () => setAlertVisible(false),
-          });
-          setAlertVisible(true);
-        }
-      },
-      onCancel: () => setAlertVisible(false),
-    });
-    setAlertVisible(true);
-  }, [setAlertConfig, setAlertVisible]);
-
-  // cerrar sesión y forzar reset de navegación al flujo de Login
+  // ============================================================
+  // CONFIRMAR Y CERRAR SESIÓN
+  // ============================================================
   const handleLogout = async () => {
     try {
       await signOut(auth);
-      // No usar navigation.reset() aquí
-      // El useEffect en Navigation.js detectará el cambio en auth
-      // y automáticamente cambiará isAuthenticated a false
     } catch (error) {
       console.error("Error al cerrar sesión:", error);
       setAlertConfig({
@@ -645,54 +1077,42 @@ export default function Profile({ navigation }) {
       setAlertVisible(true);
     }
   };
-
-  const getInitials = () => {
-    const name = firstName || displayName || currentUser?.email || "";
-    return name.charAt(0).toUpperCase();
-  };
-
-  const onlyLetters = (text) => {
-    // Permite letras Unicode (incluye Ñ/ñ y todas las vocales con acento),
-    // espacios, guion y apóstrofe.
-    try {
-      // usa Unicode property escapes si están soportadas
-      return text
-        .replace(/[^'\-\p{L}\s]/gu, "")
-        .replace(/\s{2,}/g, " ")
-        .trimStart();
-    } catch (e) {
-      // fallback para motores que no soporten \p{L}
-      return text
-        .normalize("NFKD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/[^A-Za-zÁÉÍÓÚáéíóúÑñ\s'-]/g, "")
-        .replace(/\s{2,}/g, " ")
-        .trimStart();
-    }
-  };
-
+  // ============================================================
+  // RETURN / JSX
+  // ============================================================
   return (
     <SafeAreaProvider>
       <SafeAreaView
         style={[styles.container, { backgroundColor: theme.background }]}
       >
         <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
-          <CustomHeader onBackPress={() => navigation.goBack()} theme={theme} />
+          <CustomHeader
+            onBackPress={() => navigation.goBack()}
+            theme={theme}
+          />
 
           <ScrollView
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.scrollContent}
           >
             <Animated.View
-              style={[styles.content, { transform: [{ translateY: slideAnim }] }]}
+              style={[
+                styles.content,
+                { transform: [{ translateY: slideAnim }] },
+              ]}
             >
-              {/* Avatar Section */}
+              {/* ============================================================ */}
+              {/* SECCIÓN DE AVATAR */}
+              {/* ============================================================ */}
               <View style={styles.avatarSection}>
                 <View style={styles.avatarContainer}>
                   {profileImageUri ? (
                     <Image
                       source={{ uri: profileImageUri }}
-                      style={[styles.avatar, { borderColor: theme.primary }]}
+                      style={[
+                        styles.avatar,
+                        { borderColor: theme.primary },
+                      ]}
                     />
                   ) : (
                     <LinearGradient
@@ -707,7 +1127,9 @@ export default function Profile({ navigation }) {
                           styles.avatarInitials,
                           {
                             color:
-                              theme.text === "#FFFFFF" ? "#1A1A1A" : "#FFFFFF",
+                              theme.text === "#FFFFFF"
+                                ? "#1A1A1A"
+                                : "#FFFFFF",
                           },
                         ]}
                       >
@@ -716,24 +1138,36 @@ export default function Profile({ navigation }) {
                     </LinearGradient>
                   )}
 
-                  {isEditing && (
-                    <TouchableOpacity
-                      onPress={pickImage}
-                      activeOpacity={0.8}
-                      style={[
-                        styles.cameraIconContainer,
-                        {
-                          backgroundColor: theme.primary,
-                          borderColor: theme.background,
-                        },
-                      ]}
-                    >
-                      <Ionicons name="camera" size={20} color="#1A1A1A" />
-                    </TouchableOpacity>
-                  )}
+                  <TouchableOpacity
+                    onPress={() => {
+                      if (!isEditing) {
+                        setAlertConfig({
+                          type: "warning",
+                          customTitle: "Modo edición",
+                          message: "Activa 'Editar Perfil' para cambiar la imagen.",
+                          onConfirm: () => setAlertVisible(false),
+                          onCancel: () => setAlertVisible(false),
+                          confirmText: "Aceptar",
+                          cancelText: "Cerrar",
+                        });
+                        setAlertVisible(true);
+                        return;
+                      }
+                      pickImage();
+                    }}
+                    activeOpacity={0.8}
+                    style={[
+                      styles.cameraIconContainer,
+                      {
+                        backgroundColor: theme.primary,
+                        borderColor: theme.background,
+                      },
+                    ]}
+                  >
+                    <Ionicons name="camera" size={20} color="#1A1A1A" />
+                  </TouchableOpacity>
                 </View>
 
-                {/* Nombre grande */}
                 <Text style={[styles.name, { color: theme.text }]}>
                   {displayName ||
                     `${firstName} ${lastName}`.trim() ||
@@ -743,14 +1177,17 @@ export default function Profile({ navigation }) {
                   {currentUser?.email}
                 </Text>
               </View>
-
-              {/* Card de Información Personal */}
+              {/* ============================================================ */}
+              {/* CARD DE INFORMACIÓN PERSONAL */}
+              {/* ============================================================ */}
               <View style={[styles.card, { backgroundColor: theme.card }]}>
-                <Text style={[styles.cardTitle, { color: theme.primary }]}>
+                <Text
+                  style={[styles.cardTitle, { color: theme.primary }]}
+                >
                   Información Personal
                 </Text>
 
-                {/* Email */}
+                {/* EMAIL - Solo lectura */}
                 <View style={styles.inputGroup}>
                   <View
                     style={[
@@ -758,7 +1195,11 @@ export default function Profile({ navigation }) {
                       { backgroundColor: theme.background },
                     ]}
                   >
-                    <Ionicons name="mail" size={20} color={theme.primary} />
+                    <Ionicons
+                      name="mail"
+                      size={20}
+                      color={theme.primary}
+                    />
                   </View>
                   <View style={styles.inputWrapper}>
                     <Text
@@ -780,7 +1221,7 @@ export default function Profile({ navigation }) {
                   </View>
                 </View>
 
-                {/* Nombre */}
+                {/* NOMBRE */}
                 <View style={styles.inputGroup}>
                   <View
                     style={[
@@ -788,7 +1229,11 @@ export default function Profile({ navigation }) {
                       { backgroundColor: theme.background },
                     ]}
                   >
-                    <Ionicons name="person" size={20} color={theme.primary} />
+                    <Ionicons
+                      name="person"
+                      size={20}
+                      color={theme.primary}
+                    />
                   </View>
                   <View style={styles.inputWrapper}>
                     <Text
@@ -829,7 +1274,7 @@ export default function Profile({ navigation }) {
                   </View>
                 </View>
 
-                {/* Apellido */}
+                {/* APELLIDO */}
                 <View style={styles.inputGroup}>
                   <View
                     style={[
@@ -881,7 +1326,6 @@ export default function Profile({ navigation }) {
                     )}
                   </View>
                 </View>
-
                 {/* DNI */}
                 <View style={styles.inputGroup}>
                   <View
@@ -890,7 +1334,11 @@ export default function Profile({ navigation }) {
                       { backgroundColor: theme.background },
                     ]}
                   >
-                    <Ionicons name="card" size={20} color={theme.primary} />
+                    <Ionicons
+                      name="card"
+                      size={20}
+                      color={theme.primary}
+                    />
                   </View>
                   <View style={styles.inputWrapper}>
                     <Text
@@ -922,15 +1370,82 @@ export default function Profile({ navigation }) {
                       editable={isEditing}
                     />
                     {validationError ? (
-                      <Text style={[styles.errorText, { color: theme.error }]}>
+                      <Text
+                        style={[
+                          styles.errorText,
+                          { color: theme.error },
+                        ]}
+                      >
                         {validationError}
                       </Text>
                     ) : null}
                   </View>
                 </View>
+              </View>
+              {/* ============================================================ */}
+              {/* CARD DE DIRECCIÓN ✨ CON PROVINCIA FIJA EN SALTA */}
+              {/* ============================================================ */}
+              <View style={[styles.card, { backgroundColor: theme.card }]}>
+                <Text
+                  style={[styles.cardTitle, { color: theme.primary }]}
+                >
+                  Dirección
+                </Text>
 
-                {/* Dirección */}
+                {/* PROVINCIA - SOLO LECTURA (SALTA) */}
                 <View style={styles.inputGroup}>
+                  <View
+                    style={[
+                      styles.iconContainer,
+                      { backgroundColor: theme.background },
+                    ]}
+                  >
+                    <Ionicons
+                      name="map"
+                      size={20}
+                      color={theme.primary}
+                    />
+                  </View>
+                  <View style={styles.inputWrapper}>
+                    <Text
+                      style={[
+                        styles.inputLabel,
+                        { color: theme.textSecondary },
+                      ]}
+                    >
+                      Provincia
+                    </Text>
+                    <View
+                      style={[
+                        styles.selectContainer,
+                        { borderBottomColor: "transparent" },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.inputReadOnly,
+                          { color: theme.text },
+                        ]}
+                      >
+                        Salta
+                      </Text>
+                      <Ionicons
+                        name="lock-closed"
+                        size={16}
+                        color={theme.textSecondary}
+                      />
+                    </View>
+                  </View>
+                </View>
+                {/* DEPARTAMENTO */}
+                <TouchableOpacity
+                  style={styles.inputGroup}
+                  onPress={() =>
+                    isEditing &&
+                    setIsDepartmentModalVisible(true)
+                  }
+                  disabled={!isEditing}
+                >
                   <View
                     style={[
                       styles.iconContainer,
@@ -950,27 +1465,37 @@ export default function Profile({ navigation }) {
                         { color: theme.textSecondary },
                       ]}
                     >
-                      Dirección
+                      Departamento / Localidad
                     </Text>
-                    <TextInput
+                    <View
                       style={[
-                        styles.input,
-                        {
-                          color: theme.text,
-                          borderBottomColor: theme.border,
-                        },
-                        !isEditing && styles.inputDisabled,
+                        styles.selectContainer,
+                        { borderBottomColor: theme.border },
                       ]}
-                      value={address}
-                      onChangeText={setAddress}
-                      placeholder="Calle, número, ciudad"
-                      placeholderTextColor={theme.textSecondary}
-                      editable={isEditing}
-                    />
+                    >
+                      <Text
+                        style={[
+                          styles.inputReadOnly,
+                          { color: theme.text },
+                          !department && {
+                            color: theme.textSecondary,
+                          },
+                        ]}
+                      >
+                        {department || "Seleccionar departamento"}
+                      </Text>
+                      {isEditing && (
+                        <Ionicons
+                          name="chevron-forward"
+                          size={20}
+                          color={theme.textSecondary}
+                        />
+                      )}
+                    </View>
                   </View>
-                </View>
+                </TouchableOpacity>
 
-                {/* Teléfono */}
+                {/* CALLE - ahora editable (solo letras, sin emojis, max 30) */}
                 <View style={styles.inputGroup}>
                   <View
                     style={[
@@ -978,7 +1503,7 @@ export default function Profile({ navigation }) {
                       { backgroundColor: theme.background },
                     ]}
                   >
-                    <Ionicons name="call" size={20} color={theme.primary} />
+                    <Ionicons name="road" size={20} color={theme.primary} />
                   </View>
                   <View style={styles.inputWrapper}>
                     <Text
@@ -987,7 +1512,164 @@ export default function Profile({ navigation }) {
                         { color: theme.textSecondary },
                       ]}
                     >
-                      Teléfono
+                      Calle
+                    </Text>
+                    {isEditing ? (
+                      <TextInput
+                        style={[
+                          styles.input,
+                          { color: theme.text, borderBottomColor: theme.border },
+                          !isEditing && styles.inputDisabled,
+                        ]}
+                        value={street}
+                        onChangeText={(t) => {
+                          const cleaned = onlyLetters(t).slice(0, 30);
+                          setStreet(cleaned);
+                          setStreetError("");
+                        }}
+                        placeholder="Nombre de la calle"
+                        placeholderTextColor={theme.textSecondary}
+                        maxLength={30}
+                        editable={isEditing}
+                      />
+                    ) : (
+                      <Text
+                        style={[
+                          styles.inputReadOnly,
+                          { color: theme.text },
+                          !street && { color: theme.textSecondary },
+                        ]}
+                      >
+                        {street || "Sin especificar"}
+                      </Text>
+                    )}
+                    {streetError ? (
+                      <Text style={[styles.errorText, { color: theme.error }]}>
+                        {streetError}
+                      </Text>
+                    ) : null}
+                  </View>
+                </View>
+                {/* NÚMERO MEJORADO */}
+                <View style={styles.inputGroup}>
+                  <View style={[styles.iconContainer, { backgroundColor: theme.background }]}>
+                    <Ionicons name="hash" size={20} color={theme.primary} />
+                  </View>
+                  <View style={styles.inputWrapper}>
+                    <Text style={[styles.inputLabel, { color: theme.textSecondary }]}>Número</Text>
+                    <TextInput
+                      style={[styles.input, { color: theme.text, borderBottomColor: theme.border }, !isEditing && styles.inputDisabled]}
+                      value={streetNumber}
+                      onChangeText={(text) => {
+                        // Permitir números, letras, espacios, guiones y barras (elimina emojis/otros)
+                        const cleaned = text.replace(/[^0-9A-Za-z\s\-\/]/g, "");
+                        setStreetNumber(cleaned);
+                        setStreetError("");
+                      }}
+                      placeholder="Ej: 1234, S/N, 123-A"
+                      placeholderTextColor={theme.textSecondary}
+                      maxLength={10}
+                      editable={isEditing}
+                    />
+                    {streetError ? (
+                      <Text style={[styles.errorText, { color: theme.error }]}>{streetError}</Text>
+                    ) : (
+                      <Text style={[styles.helperText, { color: theme.textSecondary }]}>
+                        Ingresa el número o "S/N" si no tiene
+                      </Text>
+                    )}
+                  </View>
+                </View>
+              </View>
+              {/* ============================================================ */}
+              {/* CARD DE TELÉFONO ✨ CON SELECCIÓN DE ÁREA */}
+              {/* ============================================================ */}
+              <View style={[styles.card, { backgroundColor: theme.card }]}>
+                <Text
+                  style={[styles.cardTitle, { color: theme.primary }]}
+                >
+                  Teléfono
+                </Text>
+
+                {/* ÁREA LOCAL */}
+                <TouchableOpacity
+                  style={styles.inputGroup}
+                  onPress={() =>
+                    isEditing && setIsPhoneAreaModalVisible(true)
+                  }
+                  disabled={!isEditing}
+                >
+                  <View
+                    style={[
+                      styles.iconContainer,
+                      { backgroundColor: theme.background },
+                    ]}
+                  >
+                    <Ionicons
+                      name="call"
+                      size={20}
+                      color={theme.primary}
+                    />
+                  </View>
+                  <View style={styles.inputWrapper}>
+                    <Text
+                      style={[
+                        styles.inputLabel,
+                        { color: theme.textSecondary },
+                      ]}
+                    >
+                      Área / Código Local
+                    </Text>
+                    <View
+                      style={[
+                        styles.selectContainer,
+                        { borderBottomColor: theme.border },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.inputReadOnly,
+                          { color: theme.text },
+                          !phoneArea && {
+                            color: theme.textSecondary,
+                          },
+                        ]}
+                      >
+                        {phoneArea || "Seleccionar área"}
+                      </Text>
+                      {isEditing && (
+                        <Ionicons
+                          name="chevron-forward"
+                          size={20}
+                          color={theme.textSecondary}
+                        />
+                      )}
+                    </View>
+                  </View>
+                </TouchableOpacity>
+
+                {/* NÚMERO DE TELÉFONO */}
+                <View style={styles.inputGroup}>
+                  <View
+                    style={[
+                      styles.iconContainer,
+                      { backgroundColor: theme.background },
+                    ]}
+                  >
+                    <Ionicons
+                      name="keypad"
+                      size={20}
+                      color={theme.primary}
+                    />
+                  </View>
+                  <View style={styles.inputWrapper}>
+                    <Text
+                      style={[
+                        styles.inputLabel,
+                        { color: theme.textSecondary },
+                      ]}
+                    >
+                      Número de Teléfono
                     </Text>
                     <TextInput
                       style={[
@@ -998,49 +1680,58 @@ export default function Profile({ navigation }) {
                         },
                         !isEditing && styles.inputDisabled,
                       ]}
-                      value={phone}
+                      value={phoneNumber}
                       onChangeText={(text) => {
-                        // permitir + solo al inicio y solo dígitos después
-                        let v = text.replace(/[^\d+]/g, "");
-                        if (v.indexOf("+") > 0) {
-                          // eliminar signos + que no estén al inicio
-                          v = v.replace(/\+/g, "");
-                        }
-                        if (v.startsWith("+")) {
-                          const digits = v.slice(1).replace(/\D/g, "").slice(0, 15);
-                          v = "+" + digits;
-                        } else {
-                          v = v.replace(/\D/g, "").slice(0, 15);
-                        }
-                        setPhone(v);
+                        const digits = text
+                          .replace(/[^\d]/g, "")
+                          .slice(0, 8);
+                        setPhoneNumber(digits);
                         setPhoneError("");
                       }}
-                      placeholder="Ej: +5491112345678 o 91112345678"
+                      placeholder="Ej: 1234567"
                       placeholderTextColor={theme.textSecondary}
-                      keyboardType="phone-pad"
+                      keyboardType="numeric"
+                      maxLength={8}
                       editable={isEditing}
                     />
                     {phoneError ? (
-                      <Text style={[styles.errorText, { color: theme.error }]}>
+                      <Text
+                        style={[
+                          styles.errorText,
+                          { color: theme.error },
+                        ]}
+                      >
                         {phoneError}
                       </Text>
-                    ) : (
+                    ) : phoneArea ? (
                       <Text
                         style={[
                           styles.helperText,
                           { color: theme.textSecondary },
                         ]}
                       >
-                        Formato: +[código país][número] o [número]. 6-15 dígitos.
+                        {getSelectedAreaCode()} {phoneNumber}
                       </Text>
-                    )}
+                    ) : null}
                   </View>
                 </View>
+              </View>
+              {/* ============================================================ */}
+              {/* CARD DE INFORMACIÓN ADICIONAL */}
+              {/* ============================================================ */}
+              <View style={[styles.card, { backgroundColor: theme.card }]}>
+                <Text
+                  style={[styles.cardTitle, { color: theme.primary }]}
+                >
+                  Información Adicional
+                </Text>
 
-                {/* Género */}
+                {/* GÉNERO */}
                 <TouchableOpacity
                   style={styles.inputGroup}
-                  onPress={() => isEditing && setIsGenderModalVisible(true)}
+                  onPress={() =>
+                    isEditing && setIsGenderModalVisible(true)
+                  }
                   disabled={!isEditing}
                 >
                   <View
@@ -1074,7 +1765,9 @@ export default function Profile({ navigation }) {
                         style={[
                           styles.inputReadOnly,
                           { color: theme.text },
-                          !gender && { color: theme.textSecondary },
+                          !gender && {
+                            color: theme.textSecondary,
+                          },
                         ]}
                       >
                         {gender || "Sin especificar"}
@@ -1090,7 +1783,7 @@ export default function Profile({ navigation }) {
                   </View>
                 </TouchableOpacity>
 
-                {/* Fecha de Nacimiento */}
+                {/* FECHA DE NACIMIENTO */}
                 <TouchableOpacity
                   style={styles.inputGroup}
                   onPress={() => isEditing && openDatePicker()}
@@ -1127,11 +1820,15 @@ export default function Profile({ navigation }) {
                         style={[
                           styles.inputReadOnly,
                           { color: theme.text },
-                          !dob && { color: theme.textSecondary },
+                          !dob && {
+                            color: theme.textSecondary,
+                          },
                         ]}
                       >
                         {dob
-                          ? format(dob, "dd/MM/yyyy", { locale: es })
+                          ? format(dob, "dd/MM/yyyy", {
+                              locale: es,
+                            })
                           : "Seleccionar"}
                       </Text>
                       {isEditing && (
@@ -1145,11 +1842,16 @@ export default function Profile({ navigation }) {
                   </View>
                 </TouchableOpacity>
               </View>
-
-              {/* Botón de Acción */}
+              {/* ============================================================ */}
+              {/* BOTÓN DE ACCIÓN PRINCIPAL */}
+              {/* ============================================================ */}
               <TouchableOpacity
                 style={styles.actionButton}
-                onPress={isEditing ? handleSave : () => setIsEditing(true)}
+                onPress={
+                  isEditing
+                    ? handleSave
+                    : () => setIsEditing(true)
+                }
                 disabled={isSaving}
               >
                 <LinearGradient
@@ -1159,38 +1861,53 @@ export default function Profile({ navigation }) {
                   style={styles.buttonGradient}
                 >
                   {isSaving ? (
-                    <ActivityIndicator color="#1A1A1A" size="small" />
+                    <ActivityIndicator
+                      color="#1A1A1A"
+                      size="small"
+                    />
                   ) : (
                     <>
                       <Ionicons
-                        name={isEditing ? "checkmark" : "create"}
+                        name={
+                          isEditing ? "checkmark" : "create"
+                        }
                         size={20}
                         color="#1A1A1A"
                       />
                       <Text style={styles.actionButtonText}>
-                        {isEditing ? "Guardar Cambios" : "Editar Perfil"}
+                        {isEditing
+                          ? "Guardar Cambios"
+                          : "Editar Perfil"}
                       </Text>
                     </>
                   )}
                 </LinearGradient>
               </TouchableOpacity>
-
-              {/* Configuración */}
+              {/* ============================================================ */}
+              {/* CARD DE CONFIGURACIÓN */}
+              {/* ============================================================ */}
               <View
                 style={[
                   styles.settingsCard,
                   { backgroundColor: theme.card },
                 ]}
               >
-                <Text style={[styles.cardTitle, { color: theme.primary }]}>
+                <Text
+                  style={[
+                    styles.cardTitle,
+                    { color: theme.primary },
+                  ]}
+                >
                   Configuración
                 </Text>
 
-                {/* Tema */}
+                {/* TEMA */}
                 <TouchableOpacity
                   style={[
                     styles.settingItem,
-                    { borderBottomColor: "transparent" },
+                    {
+                      borderBottomColor: "transparent",
+                    },
                   ]}
                   onPress={handleThemeChange}
                 >
@@ -1226,25 +1943,35 @@ export default function Profile({ navigation }) {
                   </View>
                 </TouchableOpacity>
               </View>
-
-              {/* Seguridad */}
+              {/* ============================================================ */}
+              {/* CARD DE SEGURIDAD */}
+              {/* ============================================================ */}
               <View
                 style={[
                   styles.settingsCard,
                   { backgroundColor: theme.card },
                 ]}
               >
-                <Text style={[styles.cardTitle, { color: theme.primary }]}>
+                <Text
+                  style={[
+                    styles.cardTitle,
+                    { color: theme.primary },
+                  ]}
+                >
                   Seguridad
                 </Text>
 
-                {/* Cambiar Contraseña */}
+                {/* CAMBIAR CONTRASEÑA */}
                 <TouchableOpacity
                   style={[
                     styles.settingItem,
-                    { borderBottomColor: "transparent" },
+                    {
+                      borderBottomColor: "transparent",
+                    },
                   ]}
-                  onPress={() => navigation.navigate("ChangePassword")}
+                  onPress={() =>
+                    navigation.navigate("ChangePassword")
+                  }
                 >
                   <View style={styles.settingLeft}>
                     <Ionicons
@@ -1269,7 +1996,9 @@ export default function Profile({ navigation }) {
                 </TouchableOpacity>
               </View>
 
-              {/* Botón Cerrar Sesión */}
+              {/* ============================================================ */}
+              {/* BOTÓN CERRAR SESIÓN */}
+              {/* ============================================================ */}
               <TouchableOpacity
                 style={styles.logoutButton}
                 onPress={() => setShowLogoutModal(true)}
@@ -1277,7 +2006,7 @@ export default function Profile({ navigation }) {
                 <View
                   style={[
                     styles.logoutButtonContent,
-                    { 
+                    {
                       backgroundColor: theme.card,
                       borderColor: theme.error + "40",
                     },
@@ -1303,8 +2032,9 @@ export default function Profile({ navigation }) {
             </Animated.View>
           </ScrollView>
         </Animated.View>
-
-        {/* Date Picker - Android / iOS */}
+        {/* ============================================================ */}
+        {/* DATE PICKER - ANDROID */}
+        {/* ============================================================ */}
         {isDatePickerVisible && Platform.OS === "android" && (
           <DateTimePicker
             value={dob || new Date()}
@@ -1314,7 +2044,9 @@ export default function Profile({ navigation }) {
             maximumDate={new Date()}
           />
         )}
-
+        {/* ============================================================ */}
+        {/* DATE PICKER - iOS */}
+        {/* ============================================================ */}
         {Platform.OS === "ios" && isDatePickerVisible && (
           <Modal
             visible={isDatePickerVisible}
@@ -1323,16 +2055,53 @@ export default function Profile({ navigation }) {
             onRequestClose={() => setIsDatePickerVisible(false)}
             presentationStyle="overFullScreen"
           >
-            <TouchableWithoutFeedback onPress={() => setIsDatePickerVisible(false)}>
-              <View style={[styles.modalOverlay, { backgroundColor: theme.modalOverlay }]} />
+            <TouchableWithoutFeedback
+              onPress={() => setIsDatePickerVisible(false)}
+            >
+              <View
+                style={[
+                  styles.modalOverlay,
+                  { backgroundColor: theme.modalOverlay },
+                ]}
+              />
             </TouchableWithoutFeedback>
             <View style={styles.iosPickerContainer}>
-              <View style={[styles.iosPickerHeader, { backgroundColor: theme.card }]}>
-                <TouchableOpacity onPress={() => { setIsDatePickerVisible(false); setTempDob(dob); }}>
-                  <Text style={{ color: theme.textSecondary, padding: 10 }}>Cancelar</Text>
+              <View
+                style={[
+                  styles.iosPickerHeader,
+                  { backgroundColor: theme.card },
+                ]}
+              >
+                <TouchableOpacity
+                  onPress={() => {
+                    setIsDatePickerVisible(false);
+                    setTempDob(dob);
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: theme.textSecondary,
+                      padding: 10,
+                    }}
+                  >
+                    Cancelar
+                  </Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={() => { setDob(tempDob); setIsDatePickerVisible(false); }}>
-                  <Text style={{ color: theme.primary, fontWeight: "700", padding: 10 }}>Aceptar</Text>
+                <TouchableOpacity
+                  onPress={() => {
+                    setDob(tempDob);
+                    setIsDatePickerVisible(false);
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: theme.primary,
+                      fontWeight: "700",
+                      padding: 10,
+                    }}
+                  >
+                    Aceptar
+                  </Text>
                 </TouchableOpacity>
               </View>
               <DateTimePicker
@@ -1345,8 +2114,52 @@ export default function Profile({ navigation }) {
             </View>
           </Modal>
         )}
+        {/* ============================================================ */}
+        {/* MODALES DE DIRECCIÓN */}
+        {/* ============================================================ */}
+        <SelectionModal
+          isVisible={isDepartmentModalVisible}
+          onClose={() => setIsDepartmentModalVisible(false)}
+          title="Selecciona Departamento"
+          options={getDepartmentsList(province)}
+          selectedValue={department}
+          onSelectValue={(value) => {
+            setDepartment(value);
+            setStreet("");
+          }}
+          theme={theme}
+        />
 
-        {/* Modal de Género */}
+        <SelectionModal
+          isVisible={isStreetModalVisible}
+          onClose={() => setIsStreetModalVisible(false)}
+          title="Selecciona Calle"
+          options={getStreetsList(province, department)}
+          selectedValue={street}
+          onSelectValue={(value) => {
+            setStreet(value);
+          }}
+          theme={theme}
+        />
+
+        {/* ============================================================ */}
+        {/* MODAL DE ÁREA LOCAL DE TELÉFONO */}
+        {/* ============================================================ */}
+        <SelectionModal
+          isVisible={isPhoneAreaModalVisible}
+          onClose={() => setIsPhoneAreaModalVisible(false)}
+          title="Selecciona Área Local"
+          options={getPhoneAreasList()}
+          selectedValue={phoneArea}
+          onSelectValue={(value) => {
+            setPhoneArea(value);
+            setPhoneNumber("");
+          }}
+          theme={theme}
+        />
+        {/* ============================================================ */}
+        {/* MODAL DE GÉNERO */}
+        {/* ============================================================ */}
         <GenderModal
           isVisible={isGenderModalVisible}
           onClose={() => setIsGenderModalVisible(false)}
@@ -1357,7 +2170,9 @@ export default function Profile({ navigation }) {
           theme={theme}
         />
 
-        {/* Modal de Tema */}
+        {/* ============================================================ */}
+        {/* MODAL DE TEMA */}
+        {/* ============================================================ */}
         <ThemeModal
           isVisible={isThemeModalVisible}
           onClose={() => setIsThemeModalVisible(false)}
@@ -1365,8 +2180,23 @@ export default function Profile({ navigation }) {
           onSelectTheme={handleThemeSelection}
           theme={theme}
         />
-
-        {/* Navegación Inferior */}
+        {/* Modal de opciones de imagen */}
+        <ImageOptionsModal
+          isVisible={isImageOptionsVisible}
+          onClose={() => setIsImageOptionsVisible(false)}
+          onTakePhoto={async () => {
+            setIsImageOptionsVisible(false);
+            await takePhoto();
+          }}
+          onPickFromLibrary={async () => {
+            setIsImageOptionsVisible(false);
+            await pickFromLibrary();
+          }}
+          theme={theme}
+        />
+        {/* ============================================================ */}
+        {/* NAVEGACIÓN INFERIOR */}
+        {/* ============================================================ */}
         <View
           style={[
             styles.navInferior,
@@ -1377,7 +2207,11 @@ export default function Profile({ navigation }) {
             onPress={() => navigation.navigate("Home")}
             style={styles.itemNav}
           >
-            <Ionicons name="home-outline" size={26} color="#000" />
+            <Ionicons
+              name="home-outline"
+              size={26}
+              color="#000"
+            />
             <Text style={styles.textoNav}>Inicio</Text>
           </TouchableOpacity>
 
@@ -1386,20 +2220,28 @@ export default function Profile({ navigation }) {
             style={styles.itemNav}
           >
             <Ionicons name="person" size={26} color="#000" />
-            <Text style={[styles.textoNav, { fontWeight: "900" }]}>
+            <Text
+              style={[
+                styles.textoNav,
+                { fontWeight: "900" },
+              ]}
+            >
               Perfil
             </Text>
           </TouchableOpacity>
         </View>
-
-        {/* Modal de Logout */}
+        {/* ============================================================ */}
+        {/* MODAL DE LOGOUT */}
+        {/* ============================================================ */}
         <Modal
           animationType="fade"
           transparent
           visible={showLogoutModal}
           onRequestClose={() => setShowLogoutModal(false)}
         >
-          <TouchableWithoutFeedback onPress={() => setShowLogoutModal(false)}>
+          <TouchableWithoutFeedback
+            onPress={() => setShowLogoutModal(false)}
+          >
             <View
               style={[
                 styles.modalOverlay,
@@ -1418,7 +2260,12 @@ export default function Profile({ navigation }) {
                     size={48}
                     color={theme.primary}
                   />
-                  <Text style={[styles.modalTitle, { color: theme.text }]}>
+                  <Text
+                    style={[
+                      styles.modalTitle,
+                      { color: theme.text },
+                    ]}
+                  >
                     Cerrar Sesión
                   </Text>
                   <Text
@@ -1474,8 +2321,9 @@ export default function Profile({ navigation }) {
             </View>
           </TouchableWithoutFeedback>
         </Modal>
-
-        {/* Alerta Personalizada */}
+        {/* ============================================================ */}
+        {/* ALERTA PERSONALIZADA */}
+        {/* ============================================================ */}
         <CustomAlert
           isVisible={alertVisible}
           type={alertConfig.type}
@@ -1489,10 +2337,66 @@ export default function Profile({ navigation }) {
   );
 }
 
+// Modal de opciones para imagen (Tomar foto / Elegir de la galería)
+const ImageOptionsModal = ({ isVisible, onClose, onTakePhoto, onPickFromLibrary, theme }) => {
+  const gradientColors = Array.isArray(theme.gradient) && theme.gradient.length ? theme.gradient : ['#FFD600', '#FFB300'];
+  const isDark = theme && theme.text === '#FFFFFF';
+  const galleryBg = isDark ? '#111' : theme.background || '#F2F2F2';
+
+  return (
+    <Modal visible={isVisible} transparent animationType="fade" onRequestClose={onClose}>
+      <TouchableWithoutFeedback onPress={onClose}>
+        <View style={[styles.modalOverlay, { backgroundColor: theme.modalOverlay }]}>
+          <TouchableWithoutFeedback>
+            <View style={[styles.modalContent, { backgroundColor: theme.card }]}>
+              <Ionicons name="images-outline" size={42} color={theme.primary} />
+              <Text style={[styles.modalTitle, { color: theme.text, marginTop: 10 }]}>Seleccionar imagen</Text>
+              <Text style={[styles.modalMessage, { color: theme.textSecondary }]}>Elige cómo deseas obtener tu imagen de perfil</Text>
+
+              <View style={{ width: '100%', marginTop: 16 }}>
+                <TouchableOpacity onPress={onTakePhoto} activeOpacity={0.85} style={{ marginBottom: 12 }}>
+                  <LinearGradient
+                    colors={gradientColors}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={{ borderRadius: 14, paddingVertical: 14, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', elevation: 6 }}
+                  >
+                    <Ionicons name="camera" size={18} color={'#1A1A1A'} />
+                    <Text style={[styles.modalButtonTextConfirm, { color: '#1A1A1A', marginLeft: 10 }]}>Tomar foto</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+
+                <TouchableOpacity onPress={onPickFromLibrary} activeOpacity={0.85} style={{ marginBottom: 12 }}>
+                  <View style={{ borderRadius: 14, paddingVertical: 14, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', backgroundColor: galleryBg, borderWidth: 1, borderColor: theme.primary }}>
+                    <Ionicons name="images" size={18} color={theme.primary} />
+                    <Text style={[styles.modalButtonTextCancel, { color: theme.primary, marginLeft: 10 }]}>Elegir de la galería</Text>
+                  </View>
+                </TouchableOpacity>
+
+                <TouchableOpacity onPress={onClose} activeOpacity={0.85}>
+                  <View style={{ borderRadius: 14, paddingVertical: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.background }}>
+                    <Text style={[styles.modalButtonTextCancel, { color: theme.textSecondary }]}>Cancelar</Text>
+                  </View>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </TouchableWithoutFeedback>
+        </View>
+      </TouchableWithoutFeedback>
+    </Modal>
+  );
+};
+// ============================================================
+// ESTILOS
+// ============================================================
 const styles = StyleSheet.create({
   container: { flex: 1 },
 
-  headerBackground: { width: "100%", height: 100, justifyContent: "center" },
+  headerBackground: {
+    width: "100%",
+    height: 100,
+    justifyContent: "center",
+  },
   headerOverlay: { ...StyleSheet.absoluteFillObject },
   headerContent: {
     flexDirection: "row",
@@ -1517,7 +2421,12 @@ const styles = StyleSheet.create({
 
   avatarSection: { alignItems: "center", marginBottom: 30 },
   avatarContainer: { marginBottom: 15 },
-  avatar: { width: 120, height: 120, borderRadius: 60, borderWidth: 4 },
+  avatar: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    borderWidth: 4,
+  },
   avatarPlaceholder: {
     width: 120,
     height: 120,
@@ -1580,7 +2489,7 @@ const styles = StyleSheet.create({
   },
 
   errorText: { fontSize: 12, marginTop: 5 },
-
+  helperText: { fontSize: 12, marginTop: 4 },
   actionButton: {
     borderRadius: 30,
     overflow: "hidden",
@@ -1640,7 +2549,11 @@ const styles = StyleSheet.create({
   itemNav: { alignItems: "center" },
   textoNav: { fontSize: 12, fontWeight: "600", color: "#000" },
 
-  modalOverlay: { flex: 1, justifyContent: "center", alignItems: "center" },
+  modalOverlay: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
   modalContent: {
     borderRadius: 24,
     width: SCREEN_WIDTH * 0.85,
@@ -1690,6 +2603,16 @@ const styles = StyleSheet.create({
   pickerHeader: { width: "100%", padding: 15, borderBottomWidth: 1 },
   pickerTitle: { fontSize: 18, fontWeight: "bold", textAlign: "center" },
 
+  searchInput: {
+    marginHorizontal: 15,
+    marginVertical: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    fontSize: 14,
+  },
+
   closeButton: {
     borderRadius: 10,
     paddingVertical: 10,
@@ -1720,7 +2643,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     borderBottomWidth: 1,
   },
-  themeItemLeft: { flexDirection: "row", alignItems: "center", gap: 12 },
+  themeItemLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
   themeIconContainer: {
     width: 40,
     height: 40,
@@ -1737,12 +2664,16 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderBottomWidth: 1,
   },
-  settingLeft: { flexDirection: "row", alignItems: "center", gap: 12 },
-  settingRight: { flexDirection: "row", alignItems: "center", gap: 8 },
+  settingLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  settingRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
   settingText: { fontSize: 16 },
   settingValue: { fontSize: 14 },
-  helperText: {
-    fontSize: 12,
-    marginTop: 4,
-  },
 });
